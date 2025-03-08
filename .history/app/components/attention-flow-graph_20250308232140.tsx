@@ -114,67 +114,18 @@ const AttentionFlowGraph = () => {
     }
   ], []);
   
-  // Wrap functions in useCallback
-  const getHeadGroup = useCallback((layer: number, head: number): number | null => {
-    const group = headGroups.find(g => g.heads.some(h => h.layer === layer && h.head === head));
-    return group ? group.id : null;
-  }, [headGroups]);
-
-  const getVisibleHeads = useCallback((): HeadPair[] => {
-    const groupedHeads = headGroups.flatMap(group => group.heads);
-    const individualHeads = selectedHeads.filter(h => 
-      !groupedHeads.some(gh => gh.layer === h.layer && gh.head === h.head)
-    );
-    return [...individualHeads, ...groupedHeads];
-  }, [headGroups, selectedHeads]);
-
-  const fetchAttentionData = useCallback(async (text: string) => {
-    try {
-      setError(null);
-      setLoading(true);
-      
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
-      const response = await fetch(`${apiUrl}/process`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ text })
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.detail || 'Failed to fetch attention data');
-      }
-
-      const data = await response.json();
-      setData(data);
-    } catch (error) {
-      console.error('Error fetching attention data:', error);
-      setError(error instanceof Error ? error.message : 'Failed to fetch attention data');
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  const debouncedFetchAttentionData = useCallback((text: string) => {
-    if (text.trim()) {
-      fetchAttentionData(text);
-    }
-  }, [fetchAttentionData]);
-
   // Initialize predefined head groups
   useEffect(() => {
     const initialGroups = predefinedGroups.map((group, index) => ({
       id: index,
       name: group.name,
-      heads: group.vertices.map(([layer, head]) => ({ layer, head }))
+      heads: group.vertices.map(([layer, head]) => ({ layer, head })) // Start with all heads active
     }));
 
     setHeadGroups(initialGroups);
     setNextGroupId(predefinedGroups.length);
   }, [predefinedGroups]);
-
+  
   // Check if backend is available on component mount
   useEffect(() => {
     const checkBackend = async () => {
@@ -189,26 +140,31 @@ const AttentionFlowGraph = () => {
     };
     checkBackend();
   }, []);
-
+  
   // Load appropriate data based on backend availability
   useEffect(() => {
     if (backendAvailable === false) {
+      // Load sample data when backend is not available
       setData(sampleAttentionData);
-      setSelectedHeads([{ layer: 0, head: 0 }]);
+      setSelectedHeads([{ layer: 0, head: 0 }]); // Initialize with first head selected
     } else if (backendAvailable === true) {
+      // Automatically fetch data for default text when backend is available
       const defaultText = "When Mary and John went to the store, John gave a drink to";
       fetchAttentionData(defaultText);
     }
   }, [backendAvailable, fetchAttentionData]);
-
+  
   const handleThresholdChange = (e: ChangeEvent<HTMLInputElement>) => {
     setThreshold(parseFloat(e.target.value));
   };
-
+  
   const handleHeadSelection = (input: string) => {
     try {
-      const line = input.trim().split('\n')[0];
-      if (!line) return;
+      // Parse a single head pair from the input
+      const line = input.trim().split('\n')[0]; // Only take the first line
+      if (!line) {
+        return;
+      }
 
       const parts = line.split(',');
       if (parts.length !== 2) {
@@ -227,9 +183,10 @@ const AttentionFlowGraph = () => {
         return;
       }
 
+      // Only allow selection if head is not in any group and not already selected
       if (getHeadGroup(layer, head) === null && 
           !selectedHeads.some(h => h.layer === layer && h.head === head)) {
-        setSelectedHeads(prev => [...prev, { layer, head }]);
+        setSelectedHeads(prev => [...prev, { layer, head }]); // Append to existing heads
         setError(null);
       } else if (getHeadGroup(layer, head) !== null) {
         setError("This head is already part of a group");
@@ -305,6 +262,55 @@ const AttentionFlowGraph = () => {
       );
     });
   };
+
+  // Wrap functions in useCallback
+  const getHeadGroup = useCallback((layer: number, head: number): number | null => {
+    const group = headGroups.find(g => g.heads.some(h => h.layer === layer && h.head === head));
+    return group ? group.id : null;
+  }, [headGroups]);
+
+  const getVisibleHeads = useCallback((): HeadPair[] => {
+    const groupedHeads = headGroups.flatMap(group => group.heads);
+    const individualHeads = selectedHeads.filter(h => 
+      !groupedHeads.some(gh => gh.layer === h.layer && gh.head === h.head)
+    );
+    return [...individualHeads, ...groupedHeads];
+  }, [headGroups, selectedHeads]);
+
+  const fetchAttentionData = useCallback(async (text: string) => {
+    try {
+      setError(null);
+      setLoading(true);
+      
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+      const response = await fetch(`${apiUrl}/process`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ text })
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.detail || 'Failed to fetch attention data');
+      }
+
+      const data = await response.json();
+      setData(data);
+    } catch (error) {
+      console.error('Error fetching attention data:', error);
+      setError(error instanceof Error ? error.message : 'Failed to fetch attention data');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  const debouncedFetchAttentionData = useCallback((text: string) => {
+    if (text.trim()) {
+      fetchAttentionData(text);
+    }
+  }, [fetchAttentionData]);
 
   const removeHead = (layer: number, head: number) => {
     setSelectedHeads(prev => prev.filter(h => !(h.layer === layer && h.head === head)));
