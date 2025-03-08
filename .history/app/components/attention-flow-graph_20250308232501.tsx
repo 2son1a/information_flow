@@ -241,28 +241,6 @@ const AttentionFlowGraph = () => {
     }
   };
 
-  const addHeadToGroup = (layer: number, head: number, groupId: number) => {
-    setHeadGroups(prev => {
-      // Find the target group
-      const targetGroup = prev.find(g => g.id === groupId);
-      if (!targetGroup) return prev;
-
-      // Toggle the head in this group
-      const isInGroup = targetGroup.heads.some(h => h.layer === layer && h.head === head);
-      
-      return prev.map(group =>
-        group.id === groupId
-          ? {
-              ...group,
-              heads: isInGroup
-                ? group.heads.filter(h => !(h.layer === layer && h.head === head))
-                : [...group.heads, { layer, head }]
-            }
-          : group
-      );
-    });
-  };
-
   const removeHead = (layer: number, head: number) => {
     setSelectedHeads(prev => prev.filter(h => !(h.layer === layer && h.head === head)));
   };
