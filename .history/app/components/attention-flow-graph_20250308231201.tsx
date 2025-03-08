@@ -318,13 +318,11 @@ const AttentionFlowGraph = () => {
   };
 
   // Add debounce to prevent too many API calls
-  /* eslint-disable react-hooks/exhaustive-deps */
   const debouncedFetchAttentionData = useCallback((text: string) => {
     if (text.trim()) {
       fetchAttentionData(text);
     }
   }, [fetchAttentionData]);
-  /* eslint-enable react-hooks/exhaustive-deps */
 
   const removeHead = (layer: number, head: number) => {
     setSelectedHeads(prev => prev.filter(h => !(h.layer === layer && h.head === head)));
