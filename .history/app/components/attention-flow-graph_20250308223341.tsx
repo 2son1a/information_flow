@@ -71,18 +71,6 @@ const AttentionFlowGraph = () => {
   const svgRef = useRef(null);
   const [error, setError] = useState<string | null>(null);
   
-  // Graph dimensions
-  const graphDimensions = {
-    width: 1000,  // Increased width
-    height: 700,  // Increased height
-    padding: {
-      top: 40,
-      right: 180,  // Slightly reduced legend space
-      bottom: 60,
-      left: 60
-    }
-  };
-  
   // Define predefined groups
   const predefinedGroups: PredefinedGroup[] = [
     {
@@ -336,14 +324,13 @@ const AttentionFlowGraph = () => {
     const svg = d3.select(svgRef.current);
     svg.selectAll("*").remove();
     
-    const width = graphDimensions.width;
-    const height = graphDimensions.height;
-    const padding = graphDimensions.padding;
-    const legendWidth = padding.right; // Width for the legend
-    const graphWidth = width - padding.left - padding.right;
-    const graphHeight = height - padding.top - padding.bottom;
-    const tokenWidth = graphWidth / data.numTokens;
-    const layerHeight = graphHeight / (data.numLayers - 1); // Increased spacing between layers
+    const width = 900;
+    const height = 500;
+    const padding = 50;
+    const legendWidth = 200; // Width for the legend
+    const graphWidth = width - legendWidth; // Adjust main graph width
+    const tokenWidth = (graphWidth - 2 * padding) / (data.numTokens);
+    const layerHeight = (height - 2 * padding) / (data.numLayers);
     
     // Create nodes
     const nodes: Node[] = [];
@@ -353,8 +340,8 @@ const AttentionFlowGraph = () => {
           id: `${l}-${t}`,
           layer: l,
           token: t,
-          x: padding.left + t * tokenWidth + tokenWidth / 2,
-          y: height - (padding.bottom + l * layerHeight), // Adjusted y-coordinate calculation
+          x: padding + t * tokenWidth + tokenWidth / 2,
+          y: height - (padding + l * layerHeight + layerHeight / 2), // Invert y-coordinate
         });
       }
     }
@@ -389,86 +376,50 @@ const AttentionFlowGraph = () => {
     // Layer labels (now on y-axis)
     for (let l = 0; l < data.numLayers; l++) {
       g.append("text")
-        .attr("x", padding.left / 2 + 25)  // Increased from 15 to 25
-        .attr("y", height - (padding.bottom + l * layerHeight))
+        .attr("x", padding / 2)
+        .attr("y", height - (padding + l * layerHeight + layerHeight / 2))
         .attr("text-anchor", "middle")
         .attr("dominant-baseline", "middle")
         .text(l.toString());
     }
     
-    // Y-axis label (Layers)
-    g.append("text")
-      .attr("x", padding.left / 2)  // Moved from -25 to center position
-      .attr("y", height / 2)
-      .attr("text-anchor", "middle")
-      .attr("dominant-baseline", "middle")
-      .attr("transform", `rotate(-90, ${padding.left / 2}, ${height / 2})`)  // Updated rotation center
-      .attr("font-size", "14px")
-      .attr("font-weight", "medium")
-      .text("Layer");
-    
     // Token labels (now on x-axis)
     for (let t = 0; t < data.numTokens; t++) {
       g.append("text")
-        .attr("x", padding.left + t * tokenWidth + tokenWidth / 2)
-        .attr("y", height - padding.bottom / 2)
+        .attr("x", padding + t * tokenWidth + tokenWidth / 2)
+        .attr("y", height - padding / 2)
         .attr("text-anchor", "middle")
         .attr("dominant-baseline", "middle")
         .text(data.tokens?.[t] || `T${t}`);  // Use actual token if available
     }
-
-    // X-axis label (Tokens)
-    g.append("text")
-      .attr("x", width / 2)
-      .attr("y", height - padding.bottom / 4)
-      .attr("text-anchor", "middle")
-      .attr("dominant-baseline", "middle")
-      .attr("font-size", "14px")
-      .attr("font-weight", "medium")
-      .text("Token");
     
     // Draw edges first (so they're behind nodes)
-    const linkElements = g.selectAll("path")
+    const linkElements = g.selectAll("line")
       .data(links)
       .enter()
-      .append("path")
-      .attr("d", (d: Link) => {
-        const source = nodes.find(n => n.id === d.source)!;
-        const target = nodes.find(n => n.id === d.target)!;
-        
-        // Calculate control points for the curve
-        const dx = target.x - source.x;
-        const dy = target.y - source.y;
-        const controlPoint1x = source.x + dx * 0.5;
-        const controlPoint1y = source.y;
-        const controlPoint2x = target.x - dx * 0.5;
-        const controlPoint2y = target.y;
-        
-        // Create a curved path using cubic Bezier curve
-        return `M ${source.x} ${source.y} ` +
-               `C ${controlPoint1x} ${controlPoint1y}, ` +
-               `${controlPoint2x} ${controlPoint2y}, ` +
-               `${target.x} ${target.y}`;
-      })
-      .attr("fill", "none")
+      .append("line")
+      .attr("x1", (d: Link) => nodes.find(n => n.id === d.source)!.x)
+      .attr("y1", (d: Link) => nodes.find(n => n.id === d.source)!.y)
+      .attr("x2", (d: Link) => nodes.find(n => n.id === d.target)!.x)
+      .attr("y2", (d: Link) => nodes.find(n => n.id === d.target)!.y)
       .attr("stroke", (d: Link) => d.groupId === -1 
-        ? individualHeadColorScale(d.head.toString())
-        : groupColorScale(d.groupId.toString())
+        ? individualHeadColorScale(d.head.toString())  // Individual heads
+        : groupColorScale(d.groupId.toString())  // Grouped heads
       )
-      .attr("stroke-width", 4)
-      .attr("opacity", 0.6)
+      .attr("stroke-width", 2) // Fixed width
+      .attr("opacity", function(d) { return 0.2 + d.weight * 0.8; }) // Scale opacity with weight
       .attr("data-source", (d: Link) => d.source)
       .attr("data-target", (d: Link) => d.target)
       .style("cursor", "pointer")
       .on("mouseover", function(event: MouseEvent, d: Link) {
         d3.select(this)
-          .attr("opacity", 1)
-          .attr("stroke-width", 6);
+          .attr("opacity", function() { return 0.4 + d.weight * 0.6; })
+          .attr("stroke-width", 3); // Slightly thicker on hover
       })
       .on("mouseout", function(event: MouseEvent, d: Link) {
         d3.select(this)
-          .attr("opacity", 0.9)
-          .attr("stroke-width", 4);
+          .attr("opacity", function() { return 0.2 + d.weight * 0.8; })
+          .attr("stroke-width", 2);
       });
     
     // Draw nodes
@@ -478,18 +429,18 @@ const AttentionFlowGraph = () => {
       .append("circle")
       .attr("cx", (d: Node) => d.x)
       .attr("cy", (d: Node) => d.y)
-      .attr("r", 6) // Decreased radius
+      .attr("r", 12) // Increased radius
       .attr("fill", "#e5e7eb")
       .attr("data-node-id", (d: Node) => d.id)
       .style("cursor", "pointer")
       .on("mouseover", function() {
         d3.select(this)
-          .attr("r", 8) // Decreased hover radius
+          .attr("r", 14)
           .attr("fill", "#d1d5db");
       })
       .on("mouseout", function() {
         d3.select(this)
-          .attr("r", 6)
+          .attr("r", 12)
           .attr("fill", "#e5e7eb");
       });
 
@@ -501,7 +452,7 @@ const AttentionFlowGraph = () => {
       .attr("class", "hover-target")
       .attr("cx", (d: Node) => d.x)
       .attr("cy", (d: Node) => d.y)
-      .attr("r", 12) // Decreased hover target radius
+      .attr("r", 20)
       .attr("fill", "transparent")
       .attr("data-node-id", (d: Node) => d.id)
       .style("cursor", "pointer")
@@ -529,7 +480,7 @@ const AttentionFlowGraph = () => {
         if (parent) {
           d3.select(parent)
             .select(`circle[data-node-id="${d.id}"]:not(.hover-target)`)
-            .attr("r", 8)
+            .attr("r", 14)
             .attr("fill", "#d1d5db");
         }
       })
@@ -542,37 +493,22 @@ const AttentionFlowGraph = () => {
         if (parent) {
           d3.select(parent)
             .select(`circle[data-node-id="${d.id}"]:not(.hover-target)`)
-            .attr("r", 6)
+            .attr("r", 12)
             .attr("fill", "#e5e7eb");
         }
       });
 
-    // Update the invisible hover targets for edges
-    g.selectAll<SVGPathElement, Link>("path.hover-target")
+    // Add invisible wider lines for easier edge hovering
+    g.selectAll<SVGLineElement, Link>("line.hover-target")
       .data(links)
       .enter()
-      .append("path")
+      .append("line")
       .attr("class", "hover-target")
-      .attr("d", (d: Link) => {
-        const source = nodes.find(n => n.id === d.source)!;
-        const target = nodes.find(n => n.id === d.target)!;
-        
-        // Calculate control points for the curve
-        const dx = target.x - source.x;
-        const dy = target.y - source.y;
-        const controlPoint1x = source.x + dx * 0.5;
-        const controlPoint1y = source.y;
-        const controlPoint2x = target.x - dx * 0.5;
-        const controlPoint2y = target.y;
-        
-        // Create a curved path using cubic Bezier curve
-        return `M ${source.x} ${source.y} ` +
-               `C ${controlPoint1x} ${controlPoint1y}, ` +
-               `${controlPoint2x} ${controlPoint2y}, ` +
-               `${target.x} ${target.y}`;
-      })
+      .attr("x1", (d: Link) => nodes.find(n => n.id === d.source)!.x)
+      .attr("y1", (d: Link) => nodes.find(n => n.id === d.source)!.y)
+      .attr("x2", (d: Link) => nodes.find(n => n.id === d.target)!.x)
+      .attr("y2", (d: Link) => nodes.find(n => n.id === d.target)!.y)
       .attr("stroke", "transparent")
-      .attr("fill", "none")
       .attr("stroke-width", 20)
       .attr("data-source", (d: Link) => d.source)
       .attr("data-target", (d: Link) => d.target)
@@ -591,19 +527,18 @@ const AttentionFlowGraph = () => {
           .style("pointer-events", "none");
 
         const group = headGroups.find(g => g.id === d.groupId);
-        const sourceNode = nodes.find(n => n.id === d.source)!;
         tooltipDiv
-          .html(`Head: Layer ${sourceNode.layer}, Head ${d.head}<br>Weight: ${d.weight.toFixed(4)}${group ? `<br>Group: ${group.name}` : '<br>Individual Head'}`)
+          .html(`Weight: ${d.weight.toFixed(4)}${group ? `<br>Group: ${group.name}` : '<br>Individual Head'}`)
           .style("left", (event.pageX + 10) + "px")
           .style("top", (event.pageY - 10) + "px");
 
         // Highlight edge
-        const parent = this.parentElement as unknown as SVGGElement;
+        const parent = this.parentElement;
         if (parent) {
-          d3.select(parent)
-            .select<SVGPathElement>(`path[data-source="${d.source}"][data-target="${d.target}"]:not(.hover-target)`)
-            .attr("opacity", 0.9)
-            .attr("stroke-width", 6);
+          d3.select<SVGLineElement, Link>(parent)
+            .select<SVGLineElement>(`line[data-source="${d.source}"][data-target="${d.target}"]:not(.hover-target)`)
+            .attr("opacity", function() { return 0.4 + d.weight * 0.6; })
+            .attr("stroke-width", 3);
         }
       })
       .on("mouseout", function(event: MouseEvent, d: Link) {
@@ -611,12 +546,12 @@ const AttentionFlowGraph = () => {
         d3.select<HTMLDivElement, unknown>("#graph-tooltip").style("display", "none");
 
         // Reset edge
-        const parent = this.parentElement as unknown as SVGGElement;
+        const parent = this.parentElement;
         if (parent) {
-          d3.select(parent)
-            .select<SVGPathElement>(`path[data-source="${d.source}"][data-target="${d.target}"]:not(.hover-target)`)
-            .attr("opacity", 0.6)
-            .attr("stroke-width", 4);
+          d3.select<SVGLineElement, Link>(parent)
+            .select<SVGLineElement>(`line[data-source="${d.source}"][data-target="${d.target}"]:not(.hover-target)`)
+            .attr("opacity", function() { return 0.2 + d.weight * 0.8; })
+            .attr("stroke-width", 2);
         }
       });
 
@@ -626,7 +561,7 @@ const AttentionFlowGraph = () => {
 
     // Add legend
     const legend = svg.append("g")
-      .attr("transform", `translate(${width - padding.right + 20}, ${padding.top})`);
+      .attr("transform", `translate(${graphWidth + padding}, ${padding})`);
 
     // Add legend title
     legend.append("text")
@@ -660,7 +595,7 @@ const AttentionFlowGraph = () => {
     const separatorY = 30 + headGroups.length * 25 + 10;
     legend.append("line")
       .attr("x1", 0)
-      .attr("x2", legendWidth - padding.left)
+      .attr("x2", legendWidth - padding)
       .attr("y1", separatorY)
       .attr("y2", separatorY)
       .attr("stroke", "#e5e7eb")
@@ -715,67 +650,37 @@ const AttentionFlowGraph = () => {
   }, [data, threshold, selectedHeads, headGroups, drawGraph]);
 
   return (
-    <div className="flex flex-col gap-4 p-4 max-w-[1200px] mx-auto">
-      <div className="flex justify-between items-start gap-4">
-        <div className="flex-1">
-          <h2 className="text-lg font-medium mb-3">Attention Flow Graph</h2>
-          
-          {backendAvailable === null ? (
-            <div className="text-blue-500 text-sm">Checking backend availability...</div>
-          ) : (
-            <div className="flex flex-col gap-4">
-              {/* Controls Section */}
-              <div className="grid grid-cols-2 gap-4">
-                {/* Head Groups */}
-                <div className="p-3 border rounded bg-gray-50">
-                  <label className="text-sm font-medium">Head Groups</label>
-                  <div className="space-y-2 mt-2 max-h-[200px] overflow-y-auto">
-                    {headGroups.map(group => {
-                      const predefinedGroup = predefinedGroups.find(g => g.name === group.name);
-                      if (!predefinedGroup) return null;
-                      
-                      return (
-                        <div key={group.id} className="p-2 border rounded bg-white">
-                          <div className="font-medium text-sm mb-2">{group.name}</div>
-                          <div className="flex flex-wrap gap-1.5">
-                            {predefinedGroup.vertices.map(([layer, head]) => (
-                              <button
-                                key={`${layer}-${head}`}
-                                onClick={() => addHeadToGroup(layer, head, group.id)}
-                                className="px-2 py-0.5 rounded text-xs transition-colors duration-200"
-                                style={{
-                                  backgroundColor: group.heads.some(h => h.layer === layer && h.head === head)
-                                    ? d3.schemeTableau10[group.id % 10]
-                                    : '#f3f4f6',
-                                  color: group.heads.some(h => h.layer === layer && h.head === head)
-                                    ? 'white'
-                                    : '#374151'
-                                }}
-                              >
-                                {layer},{head}
-                              </button>
-                            ))}
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-
-                {/* Individual Heads */}
-                <div className="p-3 border rounded bg-gray-50">
-                  <label className="text-sm font-medium">Individual Heads</label>
-                  <div className="space-y-3 mt-2">
-                    <div>
-                      <div className="text-xs text-gray-600 mb-2">Selected heads:</div>
-                      <div className="flex flex-wrap gap-1.5 min-h-[28px] p-2 bg-white rounded border">
-                        {selectedHeads.map(({ layer, head }) => (
+    <div className="flex flex-col gap-2 p-2">
+      <h2 className="text-lg font-medium">Attention Flow Graph</h2>
+      
+      {backendAvailable === null ? (
+        <div className="text-blue-500 text-sm">Checking backend availability...</div>
+      ) : (
+        <>
+          <div className="flex flex-col gap-1 p-2 border rounded text-sm">
+            <div>
+              <label className="text-sm font-medium">Head Groups</label>
+              <div className="space-y-2 mt-1">
+                {headGroups.map(group => {
+                  const predefinedGroup = predefinedGroups.find(g => g.name === group.name);
+                  if (!predefinedGroup) return null;
+                  
+                  return (
+                    <div key={group.id} className="p-2 border rounded">
+                      <div className="font-medium text-sm mb-1">{group.name}</div>
+                      <div className="flex flex-wrap gap-1">
+                        {predefinedGroup.vertices.map(([layer, head]) => (
                           <button
                             key={`${layer}-${head}`}
-                            onClick={() => removeHead(layer, head)}
-                            className="px-2 py-0.5 rounded text-white text-xs hover:opacity-80"
+                            onClick={() => addHeadToGroup(layer, head, group.id)}
+                            className="px-2 py-0.5 rounded text-xs transition-colors duration-200"
                             style={{
-                              backgroundColor: d3.schemePaired[head % 12]
+                              backgroundColor: group.heads.some(h => h.layer === layer && h.head === head)
+                                ? d3.schemeTableau10[group.id % 10]
+                                : '#f3f4f6',
+                              color: group.heads.some(h => h.layer === layer && h.head === head)
+                                ? 'white'
+                                : '#374151'
                             }}
                           >
                             {layer},{head}
@@ -783,100 +688,130 @@ const AttentionFlowGraph = () => {
                         ))}
                       </div>
                     </div>
+                  );
+                })}
+              </div>
+            </div>
 
-                    <div>
-                      <form onSubmit={(e) => {
-                        e.preventDefault();
-                        const input = e.currentTarget.querySelector('input') as HTMLInputElement;
-                        handleHeadSelection(input.value);
-                        input.value = '';
-                      }}>
-                        <div className="flex gap-2">
-                          <input
-                            type="text"
-                            className="flex-1 px-2 py-1.5 border rounded text-xs font-mono bg-white"
-                            placeholder="layer,head (e.g. 0,1)"
-                          />
-                          <button
-                            type="submit"
-                            className="px-3 py-1.5 bg-blue-500 text-white rounded text-xs hover:bg-blue-600 transition-colors"
-                          >
-                            Add
-                          </button>
-                        </div>
-                      </form>
-                      {error && (
-                        <div className="text-xs text-red-500 mt-1.5">{error}</div>
-                      )}
-                      <div className="text-xs text-gray-600 mt-1.5">
-                        Valid: Layer (0-{data.numLayers - 1}), Head (0-{data.numHeads - 1})
-                      </div>
+            <div className="mt-2">
+              <label className="text-sm font-medium">Individual Heads</label>
+              <div className="space-y-2 mt-1">
+                <div>
+                  <div className="text-xs text-gray-600 mb-1">Selected heads:</div>
+                  <div className="flex flex-wrap gap-1">
+                    {selectedHeads.map(({ layer, head }) => (
+                      <button
+                        key={`${layer}-${head}`}
+                        onClick={() => removeHead(layer, head)}
+                        className="px-2 py-0.5 rounded text-white text-xs"
+                        style={{
+                          backgroundColor: d3.schemePaired[head % 12]
+                        }}
+                      >
+                        {layer},{head}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div>
+                  <form onSubmit={(e) => {
+                    e.preventDefault();
+                    const input = e.currentTarget.querySelector('input') as HTMLInputElement;
+                    handleHeadSelection(input.value);
+                    input.value = '';
+                  }}>
+                    <div className="flex gap-1">
+                      <input
+                        type="text"
+                        className="flex-1 px-2 py-1 border rounded text-xs font-mono"
+                        placeholder="layer,head (e.g. 0,1)"
+                      />
+                      <button
+                        type="submit"
+                        className="px-3 py-1 bg-blue-500 text-white rounded text-xs hover:bg-blue-600"
+                      >
+                        Add
+                      </button>
                     </div>
+                  </form>
+                  {error && (
+                    <div className="text-xs text-red-500 mt-1">{error}</div>
+                  )}
+                  <div className="text-xs text-gray-600 mt-1">
+                    Valid: Layer (0-{data.numLayers - 1}), Head (0-{data.numHeads - 1})
                   </div>
                 </div>
               </div>
-
-              {/* Threshold Control */}
-              <div className="p-3 border rounded bg-gray-50">
-                <label className="text-sm font-medium">Edge Weight Threshold</label>
-                <div className="flex items-center gap-3 mt-2">
-                  <input 
-                    type="range" 
-                    min="0" 
-                    max="1" 
-                    step="0.01" 
-                    value={threshold} 
-                    onChange={handleThresholdChange}
-                    className="flex-1" 
-                  />
-                  <span className="text-xs font-mono w-12 text-right bg-white px-2 py-1 rounded border">
-                    {threshold.toFixed(2)}
-                  </span>
-                </div>
+            </div>
+            
+            <div className="mt-2">
+              <label className="text-sm font-medium">Edge Weight Threshold</label>
+              <div className="flex items-center gap-2">
+                <input 
+                  type="range" 
+                  min="0" 
+                  max="1" 
+                  step="0.01" 
+                  value={threshold} 
+                  onChange={handleThresholdChange}
+                  className="flex-1" 
+                />
+                <span className="text-xs w-12 text-right">{threshold.toFixed(2)}</span>
               </div>
-
-              {/* Text Input Section */}
-              {backendAvailable && (
-                <div className="p-3 border rounded bg-gray-50">
-                  <label className="text-sm font-medium">Input Text</label>
-                  <textarea
-                    className="w-full p-2 border rounded mt-2 text-sm bg-white"
-                    rows={2}
-                    placeholder="Enter text to analyze attention patterns..."
-                    onChange={(e) => debouncedFetchAttentionData(e.target.value)}
-                    disabled={loading}
-                    defaultValue="When Mary and John went to the store, John gave a drink to"
-                  />
-                  {loading && (
-                    <div className="text-xs text-blue-500 mt-1.5">Loading attention patterns...</div>
-                  )}
-                  {error && (
-                    <div className="text-xs text-red-500 mt-1.5">{error}</div>
-                  )}
-                </div>
+            </div>
+          </div>
+          
+          {backendAvailable && (
+            <div className="p-2 border rounded text-sm">
+              <label className="text-sm font-medium">Input Text</label>
+              <textarea
+                className="w-full p-2 border rounded mt-1 text-sm"
+                rows={2}
+                placeholder="Enter text to analyze attention patterns..."
+                onChange={(e) => debouncedFetchAttentionData(e.target.value)}
+                disabled={loading}
+                defaultValue="When Mary and John went to the store, John gave a drink to"
+              />
+              {loading && (
+                <div className="text-xs text-blue-500 mt-1">Loading attention patterns...</div>
               )}
-
-              {!backendAvailable && (
-                <div className="p-3 border rounded bg-yellow-50 text-xs">
-                  <p className="text-yellow-800">
-                    Backend is not available. Showing sample attention patterns.
-                  </p>
-                </div>
+              {error && (
+                <div className="text-xs text-red-500 mt-1">{error}</div>
               )}
             </div>
           )}
-        </div>
-      </div>
-
-      {/* Graph Section */}
-      {loading ? (
-        <div className="flex justify-center items-center h-[700px] border rounded bg-gray-50">
-          <div className="text-sm">Loading...</div>
-        </div>
-      ) : (
-        <div className="border rounded bg-white overflow-hidden">
-          <svg ref={svgRef} width={graphDimensions.width} height={graphDimensions.height}></svg>
-        </div>
+          
+          {!backendAvailable && (
+            <div className="p-2 border rounded bg-yellow-50 text-xs">
+              <p className="text-yellow-800">
+                Backend is not available. Showing sample attention patterns.
+              </p>
+            </div>
+          )}
+          
+          {loading ? (
+            <div className="flex justify-center items-center h-80">
+              <div className="text-sm">Loading...</div>
+            </div>
+          ) : (
+            <div className="border rounded">
+              <svg ref={svgRef} width="900" height="500"></svg>
+            </div>
+          )}
+          
+          <div className="p-2 border rounded text-xs">
+            <div className="font-medium mb-1">Instructions</div>
+            <ul className="list-disc pl-4 space-y-0.5">
+              <li>Each circle represents a token at a specific layer</li>
+              <li>Edge darkness shows attention weight</li>
+              <li>Use threshold to filter weak edges</li>
+              {backendAvailable && (
+                <li>Type text to analyze attention patterns</li>
+              )}
+            </ul>
+          </div>
+        </>
       )}
     </div>
   );

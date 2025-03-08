@@ -389,7 +389,7 @@ const AttentionFlowGraph = () => {
     // Layer labels (now on y-axis)
     for (let l = 0; l < data.numLayers; l++) {
       g.append("text")
-        .attr("x", padding.left / 2 + 25)  // Increased from 15 to 25
+        .attr("x", padding.left / 2)
         .attr("y", height - (padding.bottom + l * layerHeight))
         .attr("text-anchor", "middle")
         .attr("dominant-baseline", "middle")
@@ -398,11 +398,11 @@ const AttentionFlowGraph = () => {
     
     // Y-axis label (Layers)
     g.append("text")
-      .attr("x", padding.left / 2)  // Moved from -25 to center position
+      .attr("x", padding.left / 2)
       .attr("y", height / 2)
       .attr("text-anchor", "middle")
       .attr("dominant-baseline", "middle")
-      .attr("transform", `rotate(-90, ${padding.left / 2}, ${height / 2})`)  // Updated rotation center
+      .attr("transform", `rotate(-90, ${padding.left / 2}, ${height / 2})`)
       .attr("font-size", "14px")
       .attr("font-weight", "medium")
       .text("Layer");
@@ -462,12 +462,12 @@ const AttentionFlowGraph = () => {
       .style("cursor", "pointer")
       .on("mouseover", function(event: MouseEvent, d: Link) {
         d3.select(this)
-          .attr("opacity", 1)
+          .attr("opacity", 0.9)
           .attr("stroke-width", 6);
       })
       .on("mouseout", function(event: MouseEvent, d: Link) {
         d3.select(this)
-          .attr("opacity", 0.9)
+          .attr("opacity", 0.6)
           .attr("stroke-width", 4);
       });
     
@@ -591,9 +591,8 @@ const AttentionFlowGraph = () => {
           .style("pointer-events", "none");
 
         const group = headGroups.find(g => g.id === d.groupId);
-        const sourceNode = nodes.find(n => n.id === d.source)!;
         tooltipDiv
-          .html(`Head: Layer ${sourceNode.layer}, Head ${d.head}<br>Weight: ${d.weight.toFixed(4)}${group ? `<br>Group: ${group.name}` : '<br>Individual Head'}`)
+          .html(`Weight: ${d.weight.toFixed(4)}${group ? `<br>Group: ${group.name}` : '<br>Individual Head'}`)
           .style("left", (event.pageX + 10) + "px")
           .style("top", (event.pageY - 10) + "px");
 
@@ -878,6 +877,19 @@ const AttentionFlowGraph = () => {
           <svg ref={svgRef} width={graphDimensions.width} height={graphDimensions.height}></svg>
         </div>
       )}
+
+      {/* Instructions */}
+      <div className="p-3 border rounded bg-gray-50 text-xs">
+        <div className="font-medium mb-2">Instructions</div>
+        <ul className="grid grid-cols-2 gap-x-8 gap-y-1 pl-4 list-disc">
+          <li>Each circle represents a token at a specific layer</li>
+          <li>Edge darkness shows attention weight</li>
+          <li>Use threshold to filter weak edges</li>
+          {backendAvailable && (
+            <li>Type text to analyze attention patterns</li>
+          )}
+        </ul>
+      </div>
     </div>
   );
 };

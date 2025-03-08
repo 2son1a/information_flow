@@ -389,7 +389,7 @@ const AttentionFlowGraph = () => {
     // Layer labels (now on y-axis)
     for (let l = 0; l < data.numLayers; l++) {
       g.append("text")
-        .attr("x", padding.left / 2 + 25)  // Increased from 15 to 25
+        .attr("x", padding.left / 2)
         .attr("y", height - (padding.bottom + l * layerHeight))
         .attr("text-anchor", "middle")
         .attr("dominant-baseline", "middle")
@@ -398,11 +398,11 @@ const AttentionFlowGraph = () => {
     
     // Y-axis label (Layers)
     g.append("text")
-      .attr("x", padding.left / 2)  // Moved from -25 to center position
+      .attr("x", padding.left / 2)
       .attr("y", height / 2)
       .attr("text-anchor", "middle")
       .attr("dominant-baseline", "middle")
-      .attr("transform", `rotate(-90, ${padding.left / 2}, ${height / 2})`)  // Updated rotation center
+      .attr("transform", `rotate(-90, ${padding.left / 2}, ${height / 2})`)
       .attr("font-size", "14px")
       .attr("font-weight", "medium")
       .text("Layer");
@@ -428,46 +428,31 @@ const AttentionFlowGraph = () => {
       .text("Token");
     
     // Draw edges first (so they're behind nodes)
-    const linkElements = g.selectAll("path")
+    const linkElements = g.selectAll("line")
       .data(links)
       .enter()
-      .append("path")
-      .attr("d", (d: Link) => {
-        const source = nodes.find(n => n.id === d.source)!;
-        const target = nodes.find(n => n.id === d.target)!;
-        
-        // Calculate control points for the curve
-        const dx = target.x - source.x;
-        const dy = target.y - source.y;
-        const controlPoint1x = source.x + dx * 0.5;
-        const controlPoint1y = source.y;
-        const controlPoint2x = target.x - dx * 0.5;
-        const controlPoint2y = target.y;
-        
-        // Create a curved path using cubic Bezier curve
-        return `M ${source.x} ${source.y} ` +
-               `C ${controlPoint1x} ${controlPoint1y}, ` +
-               `${controlPoint2x} ${controlPoint2y}, ` +
-               `${target.x} ${target.y}`;
-      })
-      .attr("fill", "none")
+      .append("line")
+      .attr("x1", (d: Link) => nodes.find(n => n.id === d.source)!.x)
+      .attr("y1", (d: Link) => nodes.find(n => n.id === d.source)!.y)
+      .attr("x2", (d: Link) => nodes.find(n => n.id === d.target)!.x)
+      .attr("y2", (d: Link) => nodes.find(n => n.id === d.target)!.y)
       .attr("stroke", (d: Link) => d.groupId === -1 
-        ? individualHeadColorScale(d.head.toString())
-        : groupColorScale(d.groupId.toString())
+        ? individualHeadColorScale(d.head.toString())  // Individual heads
+        : groupColorScale(d.groupId.toString())  // Grouped heads
       )
-      .attr("stroke-width", 4)
-      .attr("opacity", 0.6)
+      .attr("stroke-width", 4) // Increased base width
+      .attr("opacity", function(d) { return 0.2 + d.weight * 0.8; }) // Scale opacity with weight
       .attr("data-source", (d: Link) => d.source)
       .attr("data-target", (d: Link) => d.target)
       .style("cursor", "pointer")
       .on("mouseover", function(event: MouseEvent, d: Link) {
         d3.select(this)
-          .attr("opacity", 1)
-          .attr("stroke-width", 6);
+          .attr("opacity", function() { return 0.4 + d.weight * 0.6; })
+          .attr("stroke-width", 6); // Increased hover width
       })
       .on("mouseout", function(event: MouseEvent, d: Link) {
         d3.select(this)
-          .attr("opacity", 0.9)
+          .attr("opacity", function() { return 0.2 + d.weight * 0.8; })
           .attr("stroke-width", 4);
       });
     
@@ -547,32 +532,17 @@ const AttentionFlowGraph = () => {
         }
       });
 
-    // Update the invisible hover targets for edges
-    g.selectAll<SVGPathElement, Link>("path.hover-target")
+    // Add invisible wider lines for easier edge hovering
+    g.selectAll<SVGLineElement, Link>("line.hover-target")
       .data(links)
       .enter()
-      .append("path")
+      .append("line")
       .attr("class", "hover-target")
-      .attr("d", (d: Link) => {
-        const source = nodes.find(n => n.id === d.source)!;
-        const target = nodes.find(n => n.id === d.target)!;
-        
-        // Calculate control points for the curve
-        const dx = target.x - source.x;
-        const dy = target.y - source.y;
-        const controlPoint1x = source.x + dx * 0.5;
-        const controlPoint1y = source.y;
-        const controlPoint2x = target.x - dx * 0.5;
-        const controlPoint2y = target.y;
-        
-        // Create a curved path using cubic Bezier curve
-        return `M ${source.x} ${source.y} ` +
-               `C ${controlPoint1x} ${controlPoint1y}, ` +
-               `${controlPoint2x} ${controlPoint2y}, ` +
-               `${target.x} ${target.y}`;
-      })
+      .attr("x1", (d: Link) => nodes.find(n => n.id === d.source)!.x)
+      .attr("y1", (d: Link) => nodes.find(n => n.id === d.source)!.y)
+      .attr("x2", (d: Link) => nodes.find(n => n.id === d.target)!.x)
+      .attr("y2", (d: Link) => nodes.find(n => n.id === d.target)!.y)
       .attr("stroke", "transparent")
-      .attr("fill", "none")
       .attr("stroke-width", 20)
       .attr("data-source", (d: Link) => d.source)
       .attr("data-target", (d: Link) => d.target)
@@ -591,9 +561,8 @@ const AttentionFlowGraph = () => {
           .style("pointer-events", "none");
 
         const group = headGroups.find(g => g.id === d.groupId);
-        const sourceNode = nodes.find(n => n.id === d.source)!;
         tooltipDiv
-          .html(`Head: Layer ${sourceNode.layer}, Head ${d.head}<br>Weight: ${d.weight.toFixed(4)}${group ? `<br>Group: ${group.name}` : '<br>Individual Head'}`)
+          .html(`Weight: ${d.weight.toFixed(4)}${group ? `<br>Group: ${group.name}` : '<br>Individual Head'}`)
           .style("left", (event.pageX + 10) + "px")
           .style("top", (event.pageY - 10) + "px");
 
@@ -601,8 +570,8 @@ const AttentionFlowGraph = () => {
         const parent = this.parentElement as unknown as SVGGElement;
         if (parent) {
           d3.select(parent)
-            .select<SVGPathElement>(`path[data-source="${d.source}"][data-target="${d.target}"]:not(.hover-target)`)
-            .attr("opacity", 0.9)
+            .select<SVGLineElement>(`line[data-source="${d.source}"][data-target="${d.target}"]:not(.hover-target)`)
+            .attr("opacity", function() { return 0.4 + d.weight * 0.6; })
             .attr("stroke-width", 6);
         }
       })
@@ -614,8 +583,8 @@ const AttentionFlowGraph = () => {
         const parent = this.parentElement as unknown as SVGGElement;
         if (parent) {
           d3.select(parent)
-            .select<SVGPathElement>(`path[data-source="${d.source}"][data-target="${d.target}"]:not(.hover-target)`)
-            .attr("opacity", 0.6)
+            .select<SVGLineElement>(`line[data-source="${d.source}"][data-target="${d.target}"]:not(.hover-target)`)
+            .attr("opacity", function() { return 0.2 + d.weight * 0.8; })
             .attr("stroke-width", 4);
         }
       });
@@ -875,9 +844,22 @@ const AttentionFlowGraph = () => {
         </div>
       ) : (
         <div className="border rounded bg-white overflow-hidden">
-          <svg ref={svgRef} width={graphDimensions.width} height={graphDimensions.height}></svg>
+          <svg ref={svgRef} width={width} height={height}></svg>
         </div>
       )}
+
+      {/* Instructions */}
+      <div className="p-3 border rounded bg-gray-50 text-xs">
+        <div className="font-medium mb-2">Instructions</div>
+        <ul className="grid grid-cols-2 gap-x-8 gap-y-1 pl-4 list-disc">
+          <li>Each circle represents a token at a specific layer</li>
+          <li>Edge darkness shows attention weight</li>
+          <li>Use threshold to filter weak edges</li>
+          {backendAvailable && (
+            <li>Type text to analyze attention patterns</li>
+          )}
+        </ul>
+      </div>
     </div>
   );
 };

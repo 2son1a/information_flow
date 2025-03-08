@@ -878,6 +878,19 @@ const AttentionFlowGraph = () => {
           <svg ref={svgRef} width={graphDimensions.width} height={graphDimensions.height}></svg>
         </div>
       )}
+
+      {/* Instructions */}
+      <div className="p-3 border rounded bg-gray-50 text-xs">
+        <div className="font-medium mb-2">Instructions</div>
+        <ul className="grid grid-cols-2 gap-x-8 gap-y-1 pl-4 list-disc">
+          <li>Each circle represents a token at a specific layer</li>
+          <li>Edge darkness shows attention weight</li>
+          <li>Use threshold to filter weak edges</li>
+          {backendAvailable && (
+            <li>Type text to analyze attention patterns</li>
+          )}
+        </ul>
+      </div>
     </div>
   );
 };

@@ -1,0 +1,18 @@
+{
+  "text": "The quick brown fox jumped over the lazy dog",
+  "numLayers": 13,
+  "numTokens": 10,
+  "numHeads": 12,
+  "tokens": ["<|endoftext|>", "The", " quick", " brown", " fox", " jumped", " over", " the", " lazy", " dog"],
+  "attentionPatterns": [
+    {
+      "sourceLayer": 0,
+      "sourceToken": 0,
+      "destLayer": 1,
+      "destToken": 0,
+      "weight": 1.0,
+      "head": 0
+    }
+    // Note: This is just the first pattern. You should run the backend once and save the full output here
+  ]
+} 
