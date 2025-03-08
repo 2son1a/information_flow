@@ -106,123 +106,6 @@ const AttentionFlowGraph = () => {
     }
   };
   
-  // Memoize drawGraph to prevent infinite loops
-  const drawGraph = React.useCallback(() => {
-    const svg = d3.select(svgRef.current);
-    svg.selectAll("*").remove();
-    
-    const width = 900;
-    const height = 500;
-    const padding = 50;
-    const layerWidth = (width - 2 * padding) / (data.numLayers);
-    const tokenHeight = (height - 2 * padding) / (data.numTokens);
-    
-    // Create nodes
-    const nodes: Node[] = [];
-    for (let l = 0; l < data.numLayers; l++) {
-      for (let t = 0; t < data.numTokens; t++) {
-        nodes.push({
-          id: `${l}-${t}`,
-          layer: l,
-          token: t,
-          x: padding + l * layerWidth + layerWidth / 2,
-          y: padding + t * tokenHeight + tokenHeight / 2,
-        });
-      }
-    }
-    
-    // Filter edges based on threshold and visible heads
-    const visibleHeads = getVisibleHeads();
-    const links: Link[] = data.attentionPatterns
-      .filter(edge => edge.weight >= threshold && visibleHeads.includes(edge.head))
-      .map(edge => ({
-        source: `${edge.sourceLayer}-${edge.sourceToken}`,
-        target: `${edge.destLayer}-${edge.destToken}`,
-        weight: edge.weight,
-        head: edge.head,
-        groupId: getHeadGroup(edge.head) ?? -1
-      }));
-    
-    // Create color scales for groups and individual heads
-    const groupColorScale = d3.scaleOrdinal(d3.schemeTableau10)
-      .domain(headGroups.map(g => g.id.toString()));
-    
-    const individualHeadColorScale = d3.scaleOrdinal(d3.schemePaired)
-      .domain(Array.from({length: data.numHeads}, (_, i) => i.toString()));
-    
-    // Draw layers and tokens labels
-    const g = svg.append("g");
-    
-    // Layer labels
-    for (let l = 0; l < data.numLayers; l++) {
-      g.append("text")
-        .attr("x", padding + l * layerWidth + layerWidth / 2)
-        .attr("y", padding / 2)
-        .attr("text-anchor", "middle")
-        .text(`Layer ${l}`);
-    }
-    
-    // Token labels
-    for (let t = 0; t < data.numTokens; t++) {
-      g.append("text")
-        .attr("x", padding / 2)
-        .attr("y", padding + t * tokenHeight + tokenHeight / 2)
-        .attr("text-anchor", "middle")
-        .attr("dominant-baseline", "middle")
-        .text(`T${t}`);
-    }
-    
-    // Draw edges first (so they're behind nodes)
-    const linkElements = g.selectAll("line")
-      .data(links)
-      .enter()
-      .append("line")
-      .attr("x1", (d: Link) => nodes.find(n => n.id === d.source)!.x)
-      .attr("y1", (d: Link) => nodes.find(n => n.id === d.source)!.y)
-      .attr("x2", (d: Link) => nodes.find(n => n.id === d.target)!.x)
-      .attr("y2", (d: Link) => nodes.find(n => n.id === d.target)!.y)
-      .attr("stroke", (d: Link) => d.groupId === -1 
-        ? individualHeadColorScale(d.head.toString())  // Individual heads
-        : groupColorScale(d.groupId.toString())  // Grouped heads
-      )
-      .attr("stroke-width", (d: Link) => 1 + d.weight * 5)
-      .attr("opacity", 0.5);
-    
-    // Draw nodes
-    const nodeElements = g.selectAll("circle")
-      .data(nodes)
-      .enter()
-      .append("circle")
-      .attr("cx", (d: Node) => d.x)
-      .attr("cy", (d: Node) => d.y)
-      .attr("r", 10)
-      .attr("fill", (d: Node) => d3.schemeCategory10[d.layer % 10]);
-    
-    // Add node labels
-    g.selectAll("text.node-label")
-      .data(nodes)
-      .enter()
-      .append("text")
-      .attr("class", "node-label")
-      .attr("x", (d: Node) => d.x)
-      .attr("y", (d: Node) => d.y)
-      .attr("text-anchor", "middle")
-      .attr("dominant-baseline", "middle")
-      .attr("fill", "white")
-      .attr("font-size", "8px")
-      .text((d: Node) => `${d.token}`);
-    
-    // Add tooltips to edges
-    linkElements
-      .append("title")
-      .text((d: Link) => `Weight: ${d.weight.toFixed(4)}`);
-    
-    // Add tooltips to nodes
-    nodeElements
-      .append("title")
-      .text((d: Node) => `Layer ${d.layer}, Token ${d.token}`);
-  }, [data, threshold, selectedHeads, headGroups]);
-
   // Draw the graph whenever relevant state changes
   useEffect(() => {
     if (!data.attentionPatterns.length) return;
@@ -390,6 +273,123 @@ const AttentionFlowGraph = () => {
     // Combine with individually selected heads
     return [...new Set([...selectedHeads.filter(h => !groupedHeads.includes(h)), ...groupedHeads])];
   };
+
+  // Memoize drawGraph to prevent infinite loops
+  const drawGraph = React.useCallback(() => {
+    const svg = d3.select(svgRef.current);
+    svg.selectAll("*").remove();
+    
+    const width = 900;
+    const height = 500;
+    const padding = 50;
+    const layerWidth = (width - 2 * padding) / (data.numLayers);
+    const tokenHeight = (height - 2 * padding) / (data.numTokens);
+    
+    // Create nodes
+    const nodes: Node[] = [];
+    for (let l = 0; l < data.numLayers; l++) {
+      for (let t = 0; t < data.numTokens; t++) {
+        nodes.push({
+          id: `${l}-${t}`,
+          layer: l,
+          token: t,
+          x: padding + l * layerWidth + layerWidth / 2,
+          y: padding + t * tokenHeight + tokenHeight / 2,
+        });
+      }
+    }
+    
+    // Filter edges based on threshold and visible heads
+    const visibleHeads = getVisibleHeads();
+    const links: Link[] = data.attentionPatterns
+      .filter(edge => edge.weight >= threshold && visibleHeads.includes(edge.head))
+      .map(edge => ({
+        source: `${edge.sourceLayer}-${edge.sourceToken}`,
+        target: `${edge.destLayer}-${edge.destToken}`,
+        weight: edge.weight,
+        head: edge.head,
+        groupId: getHeadGroup(edge.head) ?? -1
+      }));
+    
+    // Create color scales for groups and individual heads
+    const groupColorScale = d3.scaleOrdinal(d3.schemeTableau10)
+      .domain(headGroups.map(g => g.id.toString()));
+    
+    const individualHeadColorScale = d3.scaleOrdinal(d3.schemePaired)
+      .domain(Array.from({length: data.numHeads}, (_, i) => i.toString()));
+    
+    // Draw layers and tokens labels
+    const g = svg.append("g");
+    
+    // Layer labels
+    for (let l = 0; l < data.numLayers; l++) {
+      g.append("text")
+        .attr("x", padding + l * layerWidth + layerWidth / 2)
+        .attr("y", padding / 2)
+        .attr("text-anchor", "middle")
+        .text(`Layer ${l}`);
+    }
+    
+    // Token labels
+    for (let t = 0; t < data.numTokens; t++) {
+      g.append("text")
+        .attr("x", padding / 2)
+        .attr("y", padding + t * tokenHeight + tokenHeight / 2)
+        .attr("text-anchor", "middle")
+        .attr("dominant-baseline", "middle")
+        .text(`T${t}`);
+    }
+    
+    // Draw edges first (so they're behind nodes)
+    const linkElements = g.selectAll("line")
+      .data(links)
+      .enter()
+      .append("line")
+      .attr("x1", (d: Link) => nodes.find(n => n.id === d.source)!.x)
+      .attr("y1", (d: Link) => nodes.find(n => n.id === d.source)!.y)
+      .attr("x2", (d: Link) => nodes.find(n => n.id === d.target)!.x)
+      .attr("y2", (d: Link) => nodes.find(n => n.id === d.target)!.y)
+      .attr("stroke", (d: Link) => d.groupId === -1 
+        ? individualHeadColorScale(d.head.toString())  // Individual heads
+        : groupColorScale(d.groupId.toString())  // Grouped heads
+      )
+      .attr("stroke-width", (d: Link) => 1 + d.weight * 5)
+      .attr("opacity", 0.5);
+    
+    // Draw nodes
+    const nodeElements = g.selectAll("circle")
+      .data(nodes)
+      .enter()
+      .append("circle")
+      .attr("cx", (d: Node) => d.x)
+      .attr("cy", (d: Node) => d.y)
+      .attr("r", 10)
+      .attr("fill", (d: Node) => d3.schemeCategory10[d.layer % 10]);
+    
+    // Add node labels
+    g.selectAll("text.node-label")
+      .data(nodes)
+      .enter()
+      .append("text")
+      .attr("class", "node-label")
+      .attr("x", (d: Node) => d.x)
+      .attr("y", (d: Node) => d.y)
+      .attr("text-anchor", "middle")
+      .attr("dominant-baseline", "middle")
+      .attr("fill", "white")
+      .attr("font-size", "8px")
+      .text((d: Node) => `${d.token}`);
+    
+    // Add tooltips to edges
+    linkElements
+      .append("title")
+      .text((d: Link) => `Weight: ${d.weight.toFixed(4)}`);
+    
+    // Add tooltips to nodes
+    nodeElements
+      .append("title")
+      .text((d: Node) => `Layer ${d.layer}, Token ${d.token}`);
+  }, [data, threshold, selectedHeads, headGroups]);
 
   return (
     <div className="flex flex-col gap-4 p-4">
