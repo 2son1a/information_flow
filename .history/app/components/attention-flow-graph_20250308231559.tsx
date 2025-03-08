@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useRef, ChangeEvent, useCallback, useMemo } from 'react';
 import * as d3 from 'd3';
+import { debounce } from 'lodash';
 import sampleAttentionData from '../data/sample-attention.json';
 
 interface AttentionPattern {
