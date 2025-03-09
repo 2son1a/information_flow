@@ -280,9 +280,111 @@ const AttentionFlowGraph = () => {
       const line = input.trim().split('\n')[0];
       if (!line) return;
 
+      // Check for the ":,:" pattern to add all heads for all layers
+      if (line.match(/^:\s*,\s*:$/)) {
+        // We have a :,: pattern for all heads in all layers
+        const headsToAdd: HeadPair[] = [];
+        
+        for (let layer = 0; layer < data.numLayers; layer++) {
+          for (let head = 0; head < data.numHeads; head++) {
+            // Skip if already selected or part of a group
+            if (selectedHeads.some(h => h.layer === layer && h.head === head) ||
+                headGroups.some(g => g.heads.some(h => h.layer === layer && h.head === head))) {
+              continue;
+            }
+            
+            headsToAdd.push({ layer, head });
+          }
+        }
+        
+        if (headsToAdd.length === 0) {
+          setHeadError("All heads are already selected or in groups");
+          return;
+        }
+        
+        setSelectedHeads(prev => [...prev, ...headsToAdd]);
+        setHeadError(null);
+        return;
+      }
+
+      // Check for the "layer,:" pattern to add all heads for a layer
+      const allHeadsPattern = /^(\d+)\s*,\s*:$/;
+      const matchAllHeads = line.match(allHeadsPattern);
+      
+      if (matchAllHeads) {
+        // We have a layer,: pattern
+        const layer = parseInt(matchAllHeads[1]);
+        
+        // Validate layer number
+        if (layer < 0 || layer >= data.numLayers) {
+          setHeadError(`Layer must be 0-${data.numLayers - 1}`);
+          return;
+        }
+        
+        // Add all heads for this layer
+        const headsToAdd: HeadPair[] = [];
+        
+        for (let head = 0; head < data.numHeads; head++) {
+          // Skip if already selected or part of a group
+          if (selectedHeads.some(h => h.layer === layer && h.head === head) ||
+              headGroups.some(g => g.heads.some(h => h.layer === layer && h.head === head))) {
+            continue;
+          }
+          
+          headsToAdd.push({ layer, head });
+        }
+        
+        if (headsToAdd.length === 0) {
+          setHeadError("All heads in this layer are already selected or in groups");
+          return;
+        }
+        
+        setSelectedHeads(prev => [...prev, ...headsToAdd]);
+        setHeadError(null);
+        return;
+      }
+      
+      // Check for the ":,head" pattern to add all layers for a head
+      const allLayersPattern = /^:\s*,\s*(\d+)$/;
+      const matchAllLayers = line.match(allLayersPattern);
+      
+      if (matchAllLayers) {
+        // We have a :,head pattern
+        const head = parseInt(matchAllLayers[1]);
+        
+        // Validate head number
+        if (head < 0 || head >= data.numHeads) {
+          setHeadError(`Head must be 0-${data.numHeads - 1}`);
+          return;
+        }
+        
+        // Add all layers for this head
+        const headsToAdd: HeadPair[] = [];
+        
+        for (let layer = 0; layer < data.numLayers; layer++) {
+          // Skip if already selected or part of a group
+          if (selectedHeads.some(h => h.layer === layer && h.head === head) ||
+              headGroups.some(g => g.heads.some(h => h.layer === layer && h.head === head))) {
+            continue;
+          }
+          
+          headsToAdd.push({ layer, head });
+        }
+        
+        if (headsToAdd.length === 0) {
+          setHeadError("All layers for this head are already selected or in groups");
+          return;
+        }
+        
+        setSelectedHeads(prev => [...prev, ...headsToAdd]);
+        setHeadError(null);
+        return;
+      }
+      
+      // Original logic for single head selection
       const parts = line.split(',');
       if (parts.length !== 2) {
-        setHeadError("Invalid format. Please use 'layer,head' format (e.g., '0,1')");
+        setHeadError("Invalid format. Please use 'layer,head' (e.g., '0,1'), 'layer,:' for all heads in a layer, ':,head' for all layers of a head, or ':,:' for all heads");
         return;
       }
 
@@ -422,7 +524,7 @@ const AttentionFlowGraph = () => {
   }, [headGroups, groupColors, colorPalette]);
 
   // Function to get a random color that isn't already in use
-  const getRandomColor = () => {
+  const getRandomColor = useCallback(() => {
     // Get all colors currently in use
     const usedColors = Object.values(groupColors);
     
@@ -437,24 +539,24 @@ const AttentionFlowGraph = () => {
     // Pick a random color from the available options
     const randomIndex = Math.floor(Math.random() * availableOptions.length);
     return availableOptions[randomIndex];
-  };
+  }, [groupColors, colorPalette]);
 
   // Function to change a group's color
-  const changeGroupColor = (groupId: number) => {
+  const changeGroupColor = useCallback((groupId: number) => {
     const newColor = getRandomColor();
     setGroupColors(prev => ({
       ...prev,
       [groupId]: newColor
     }));
-  };
+  }, [getRandomColor]);
 
   // Function to get color for a group, using custom color if available
-  const getGroupColor = (groupId: number) => {
+  const getGroupColor = useCallback((groupId: number) => {
     if (groupColors[groupId]) {
       return groupColors[groupId];
     }
     return colorPalette[groupId % colorPalette.length];
-  };
+  }, [groupColors, colorPalette]);
 
   // Memoize drawGraph to prevent infinite loops
   const drawGraph = React.useCallback(() => {
@@ -524,7 +626,6 @@ const AttentionFlowGraph = () => {
       .attr("y", height / 2)
       .attr("text-anchor", "middle")
       .attr("dominant-baseline", "middle")
-      .attr("transform", `rotate(-90, ${padding.left / 2}, ${height / 2})`)  // Updated rotation center
       .attr("font-size", "14px")
       .attr("font-weight", "medium")
       .text("Layer");
@@ -835,7 +936,6 @@ const AttentionFlowGraph = () => {
     threshold, 
     selectedHeads, 
     headGroups,
-    groupColors,
     getGroupColor,
     getVisibleHeads,
     changeGroupColor,
@@ -1056,7 +1156,7 @@ const AttentionFlowGraph = () => {
                             <input
                               type="text"
                               className="flex-1 px-3 py-2 text-xs font-mono bg-white border-b border-gray-200 focus:border-[#3B82F6] focus:outline-none transition-colors rounded-md shadow-[0_1px_2px_rgba(0,0,0,0.02)]"
-                              placeholder="layer,head (e.g. 0,1)"
+                              placeholder="layer,head or layer,: or :,head or :,:"
                             />
                             <button
                               type="submit"
