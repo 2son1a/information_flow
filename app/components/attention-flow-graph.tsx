@@ -61,6 +61,7 @@ interface AttentionPattern {
   destToken: number;
   weight: number;
   head: number;
+  headType?: string;
 } 
 
 interface HeadPair {
@@ -81,6 +82,13 @@ interface GraphData {
   numHeads: number;
   attentionPatterns: AttentionPattern[];
   tokens?: string[];  // Optional array of actual tokens
+  model_name?: string;
+  model_info?: {
+    name: string;
+    layers: number;
+    heads: number;
+    architecture: string;
+  };
 }
 
 interface Node {
@@ -128,7 +136,7 @@ const AttentionFlowGraph = () => {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [currentModel, setCurrentModel] = useState<string>("gpt2-small");
   const [availableModels, setAvailableModels] = useState<string[]>(["gpt2-small", "pythia-2.8b"]);
-  const [sampleAttentionDataMap, setSampleAttentionDataMap] = useState<Record<string, any>>({});
+  const [sampleAttentionDataMap, setSampleAttentionDataMap] = useState<Record<string, GraphData>>({});
   
   // Graph dimensions
   const graphDimensions = {
@@ -277,41 +285,22 @@ const AttentionFlowGraph = () => {
     }
   }, [currentModel]);
 
-  const debouncedFetchAttentionData = useCallback(
-    (() => {
-      let timeoutId: NodeJS.Timeout | null = null;
-      return (text: string) => {
-        if (timeoutId) {
-          clearTimeout(timeoutId);
-        }
-        
-        timeoutId = setTimeout(() => {
-          if (text.trim()) {
-            fetchAttentionData(text);
-          }
-          timeoutId = null;
-        }, 500); // 500ms debounce delay
-      };
-    })(),
-    [fetchAttentionData]
-  );
-
-  // Fetch available models from backend
-  const fetchAvailableModels = useCallback(async () => {
-    try {
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://0.0.0.0:8000';
-      const response = await fetch(`${apiUrl}/models`);
-      
-      if (response.ok) {
-        const data = await response.json();
-        if (data.available_models && Array.isArray(data.available_models)) {
-          setAvailableModels(data.available_models);
-        }
-      }
-    } catch (error) {
-      console.error('Error fetching available models:', error);
+  // Create a ref to store the timeout ID
+  const timeoutIdRef = useRef<NodeJS.Timeout | null>(null);
+  
+  // Create a debounced version of fetchAttentionData
+  const debouncedFetchAttentionData = useCallback((text: string) => {
+    if (timeoutIdRef.current) {
+      clearTimeout(timeoutIdRef.current);
     }
-  }, []);
+    
+    timeoutIdRef.current = setTimeout(() => {
+      if (text.trim().length > 0) {
+        fetchAttentionData(text);
+      }
+      timeoutIdRef.current = null;
+    }, 1000);
+  }, [fetchAttentionData]);
 
   // Check backend availability and fetch models
   useEffect(() => {
@@ -438,7 +427,7 @@ const AttentionFlowGraph = () => {
       try {
         const response = await fetch(`/data/sample-attention-${modelName}.json`);
         if (response.ok) {
-          const data = await response.json();
+          const data = await response.json() as GraphData;
           return data;
         } else {
           console.error(`Failed to load sample data for model ${modelName}`);
@@ -452,7 +441,7 @@ const AttentionFlowGraph = () => {
 
     // Try to load sample data for all available models
     const loadAllSampleData = async () => {
-      const dataMap: Record<string, any> = {};
+      const dataMap: Record<string, GraphData> = {};
       for (const model of availableModels) {
         const modelData = await loadSampleData(model);
         if (modelData) {
@@ -468,7 +457,7 @@ const AttentionFlowGraph = () => {
     };
     
     loadAllSampleData();
-  }, [availableModels]);
+  }, [availableModels, currentModel]);
   
   // Update data when model changes
   useEffect(() => {
