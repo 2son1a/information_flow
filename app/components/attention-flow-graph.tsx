@@ -73,6 +73,7 @@ interface HeadGroup {
   id: number;
   name: string;
   heads: HeadPair[];
+  description?: string;
 }
 
 interface GraphData {
@@ -102,6 +103,7 @@ interface Link {
 interface PredefinedGroup {
   name: string;
   vertices: [number, number][];
+  description?: string;
 }
 
 const AttentionFlowGraph = () => {
@@ -125,6 +127,8 @@ const AttentionFlowGraph = () => {
   const [openDropdownId, setOpenDropdownId] = useState<string | null>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const [currentModel, setCurrentModel] = useState<string>("gpt2-small");
+  const [availableModels, setAvailableModels] = useState<string[]>(["gpt2-small", "pythia-2.8b"]);
   
   // Graph dimensions
   const graphDimensions = {
@@ -138,37 +142,89 @@ const AttentionFlowGraph = () => {
     }
   };
   
-  // Wrap predefinedGroups in useMemo
-  const predefinedGroups = useMemo<PredefinedGroup[]>(() => [
-    {
-      name: "Name Mover",
-      vertices: [[9, 9], [10, 0], [9, 6]]
-    },
-    {
-      name: "Negative",
-      vertices: [[10, 7], [11, 10]]
-    },
-    {
-      name: "S Inhibition",
-      vertices: [[8, 10], [7, 9], [8, 6], [7, 3]]
-    },
-    {
-      name: "Induction",
-      vertices: [[5, 5], [5, 9], [6, 9], [5, 8]]
-    },
-    {
-      name: "Duplicate Token",
-      vertices: [[0, 1], [0, 10], [3, 0]]
-    },
-    {
-      name: "Previous Token",
-      vertices: [[4, 11], [2, 2]]
-    },
-    {
-      name: "Backup Name Mover",
-      vertices: [[11, 2], [10, 6], [10, 10], [10, 2], [9, 7], [10, 1], [11, 9], [9, 0]]
-    }
-  ], []);
+  // Define model-specific predefined head groups
+  const modelSpecificGroups = useMemo<Record<string, PredefinedGroup[]>>(() => ({
+    "gpt2-small": [
+      {
+        name: "Name Mover",
+        vertices: [[9, 9], [10, 0], [9, 6]],
+        description: "Attend to names and copy them to output. Active at END token position."
+      },
+      {
+        name: "Negative",
+        vertices: [[10, 7], [11, 10]],
+        description: "Write in opposite direction of Name Movers, decreasing prediction confidence."
+      },
+      {
+        name: "S Inhibition",
+        vertices: [[8, 10], [7, 9], [8, 6], [7, 3]],
+        description: "Reduce Name Mover Heads' attention to subject tokens. Attend to S2 and modify query patterns."
+      },
+      {
+        name: "Induction",
+        vertices: [[5, 5], [5, 9], [6, 9], [5, 8]],
+        description: "Recognize [A][B]...[A] patterns to detect duplicated tokens via different mechanism."
+      },
+      {
+        name: "Duplicate Token",
+        vertices: [[0, 1], [0, 10], [3, 0]],
+        description: "Identify repeated tokens. Active at S2, attend to S1, signal token duplication."
+      },
+      {
+        name: "Previous Token",
+        vertices: [[4, 11], [2, 2]],
+        description: "Copy subject information to the token after S1. Support Induction Heads."
+      },
+      {
+        name: "Backup Name Mover",
+        vertices: [[11, 2], [10, 6], [10, 10], [10, 2], [9, 7], [10, 1], [11, 9], [9, 0]],
+        description: "Normally inactive but replace Name Movers if they're disabled. Show circuit redundancy."
+      }
+    ],
+    "pythia-2.8b": [
+      {
+        name: "Subject Heads",
+        vertices: [
+          [17, 2],   // L17H2
+          [16, 12],  // L16H12
+          [21, 9],   // L21H9
+          [16, 20],  // L16H20
+          [22, 17],  // L22H17
+          [18, 14]   // L18H14
+        ],
+        description: "Attend to subject tokens and extract their attributes. May activate even when irrelevant to the query."
+      },
+      {
+        name: "Relation Heads",
+        vertices: [
+          [13, 31],  // L13H31
+          [18, 20],  // L18H20
+          [14, 24],  // L14H24
+          [21, 18]   // L21H18
+        ],
+        description: "Focus on relation tokens and boost possible answers for that relation type. Operate independently of subjects."
+      },
+      {
+        name: "Mixed Heads",
+        vertices: [
+          [17, 17],  // L17H17
+          [21, 23],  // L21H23
+          [23, 22],  // L23H22
+          [26, 8],   // L26H8
+          [22, 15],  // L22H15
+          [17, 30],  // L17H30
+          [18, 25]   // L18H25
+        ],
+        description: "Attend to both subject and relation tokens. Extract correct attributes more effectively through \"subject to relation propagation.\""
+      }
+    ]
+  }), []);
+  
+  // Get predefined groups for the current model
+  const predefinedGroups = useMemo<PredefinedGroup[]>(() => {
+    // Default to empty array if no groups defined for this model
+    return modelSpecificGroups[currentModel] || [];
+  }, [currentModel, modelSpecificGroups]);
   
   // Wrap functions in useCallback
   const getHeadGroup = useCallback((layer: number, head: number): number | null => {
@@ -189,13 +245,16 @@ const AttentionFlowGraph = () => {
       setTextError(null);
       setLoading(true);
       
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://0.0.0.0:8000';
       const response = await fetch(`${apiUrl}/process`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ text })
+        body: JSON.stringify({ 
+          text,
+          model_name: currentModel
+        })
       });
 
       if (!response.ok) {
@@ -216,7 +275,7 @@ const AttentionFlowGraph = () => {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [currentModel]);
 
   const debouncedFetchAttentionData = useCallback(
     (() => {
@@ -237,36 +296,132 @@ const AttentionFlowGraph = () => {
     [fetchAttentionData]
   );
 
+  // Fetch available models from backend
+  const fetchAvailableModels = useCallback(async () => {
+    try {
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://0.0.0.0:8000';
+      const response = await fetch(`${apiUrl}/models`);
+      
+      if (response.ok) {
+        const data = await response.json();
+        if (data.available_models && Array.isArray(data.available_models)) {
+          setAvailableModels(data.available_models);
+        }
+      }
+    } catch (error) {
+      console.error('Error fetching available models:', error);
+    }
+  }, []);
+
+  // Check backend availability and fetch models
+  useEffect(() => {
+    const checkBackend = async () => {
+      try {
+        const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://0.0.0.0:8000';
+        const response = await fetch(`${apiUrl}/health`);
+        
+        if (response.ok) {
+          setBackendAvailable(true);
+          // Fetch available models
+          fetchAvailableModels();
+        } else {
+          setBackendAvailable(false);
+        }
+      } catch (error) {
+        console.error('Backend not available:', error);
+        setBackendAvailable(false);
+      }
+    };
+    
+    checkBackend();
+  }, [fetchAvailableModels]);
+
+  // Get default text based on model
+  const getDefaultTextForModel = useCallback((modelName: string): string => {
+    // Convert to lowercase for case-insensitive matching
+    const lowerCaseModel = modelName.toLowerCase();
+    
+    if (lowerCaseModel.includes('pythia')) {
+      return "Fact: The Colosseum is in the country of";
+    }
+    
+    // Default text for other models (e.g., GPT-2)
+    return "When Mary and John went to the store, John gave a drink to";
+  }, []);
+
+  // Handle model change
+  const handleModelChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const rawModelName = e.target.value;
+    
+    console.log("Model changed to:", rawModelName);
+    console.log("Available predefined groups:", Object.keys(modelSpecificGroups));
+    
+    setCurrentModel(rawModelName);
+    
+    // Get default layer and token counts based on the model
+    let defaultLayers = 4;
+    let defaultTokens = 5;
+    
+    // Set appropriate defaults based on model
+    if (rawModelName.toLowerCase().includes('gpt2')) {
+      defaultLayers = 12;  // GPT2 has 12 layers
+      defaultTokens = 5;
+    } else if (rawModelName.toLowerCase().includes('pythia')) {
+      defaultLayers = 32;  // Pythia-2.8b has 32 layers
+      defaultTokens = 5;
+    }
+    
+    // Reset SVG content to clear any existing visualization
+    if (svgRef.current) {
+      const svg = d3.select(svgRef.current);
+      svg.selectAll("*").remove();
+    }
+    
+    // Clear existing data when model changes with appropriate defaults for the model
+    setData({
+      numLayers: defaultLayers,
+      numTokens: defaultTokens,
+      numHeads: rawModelName.toLowerCase().includes('pythia') ? 32 : 12,  // Pythia has 32 heads, GPT2 has 12
+      attentionPatterns: [],
+      tokens: Array(defaultTokens).fill('token')
+    });
+    
+    // Clear selected heads when model changes
+    setSelectedHeads([]);
+    
+    // Set model-specific default text
+    if (textareaRef.current) {
+      const defaultText = getDefaultTextForModel(rawModelName);
+      textareaRef.current.value = defaultText;
+      
+      // Process the default text immediately
+      debouncedFetchAttentionData(defaultText);
+    }
+  };
+
   // Initialize predefined head groups
   useEffect(() => {
     const initialGroups = predefinedGroups.map((group, index) => ({
       id: index,
       name: group.name,
-      heads: group.vertices.map(([layer, head]) => ({ layer, head }))
+      heads: group.vertices.map(([layer, head]) => ({ layer, head })),
+      description: group.description
     }));
 
     setHeadGroups(initialGroups);
-  }, [predefinedGroups]);
-
-  // Check if backend is available on component mount
-  useEffect(() => {
-    const checkBackend = async () => {
-      try {
-        const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
-        const response = await fetch(`${apiUrl}/health`);
-        setBackendAvailable(response.ok);
-      } catch (error) {
-        console.warn('Backend not available:', error);
-        setBackendAvailable(false);
-      }
-    };
-    checkBackend();
-  }, []);
+  }, [predefinedGroups, currentModel]);
 
   // Load appropriate data based on backend availability
   useEffect(() => {
     if (backendAvailable === false) {
-      setData(sampleAttentionData);
+      // Fix the linter error by providing valid GraphData
+      setData({
+        numLayers: 4,
+        numTokens: 5,
+        numHeads: 4,
+        attentionPatterns: [],
+        tokens: Array(5).fill('token')
+      });
       setSelectedHeads([{ layer: 0, head: 0 }]);
     } else if (backendAvailable === true) {
       const defaultText = "When Mary and John went to the store, John gave a drink to";
@@ -503,26 +658,26 @@ const AttentionFlowGraph = () => {
 
   // Array of vibrant colors (our preferred palette)
   const colorPalette = useMemo(() => [
-    "#3B82F6", // Blue
-    "#EF4444", // Red
-    "#10B981", // Green
-    "#F59E0B", // Amber
-    "#8B5CF6", // Purple
-    "#EC4899", // Pink
-    "#06B6D4", // Cyan
-    "#F97316", // Orange
-    "#14B8A6", // Teal
-    "#6366F1", // Indigo
-    "#84CC16", // Lime
-    "#A855F7", // Purple-500
-    "#D946EF", // Fuchsia
-    "#22D3EE", // Cyan-400
-    "#2DD4BF", // Teal-400
-    "#4ADE80", // Green-400
-    "#FB7185", // Rose-400
-    "#C084FC", // Purple-400
-    "#34D399", // Emerald-400
-    "#F472B6"  // Pink-400
+    "#38B2AC", // Teal
+    "#9F7AEA", // Purple
+    "#F6AD55", // Orange
+    "#68D391", // Green
+    "#F687B3", // Pink
+    "#4FD1C5", // Teal-400
+    "#B794F4", // Purple-300
+    "#7F9CF5", // Indigo-400
+    "#C6F6D5", // Green-200
+    "#FBD38D", // Orange-300
+    "#76E4F7", // Cyan-300
+    "#E9D8FD", // Purple-200
+    "#90CDF4", // Blue-300
+    "#FEB2B2", // Red-300
+    "#81E6D9", // Teal-300
+    "#D6BCFA", // Purple-300
+    "#FBB6CE", // Pink-300
+    "#B2F5EA", // Teal-200
+    "#667EEA", // Indigo-600
+    "#ED64A6"  // Pink-500
   ], []);
 
   // Add array to store custom colors for groups
@@ -835,7 +990,11 @@ const AttentionFlowGraph = () => {
         const group = headGroups.find(g => g.id === d.groupId);
         const sourceNode = nodes.find(n => n.id === d.source)!;
         tooltipDiv
-          .html(`Head: Layer ${sourceNode.layer}, Head ${d.head}<br>Weight: ${d.weight.toFixed(4)}${group ? `<br>Group: ${group.name}` : '<br>Individual Head'}`)
+          .html(`Head: Layer ${sourceNode.layer}, Head ${d.head}<br>Weight: ${d.weight.toFixed(4)}${
+            group ? 
+            `<br>Group: ${group.name}${group.description ? `<br><span style="font-style: italic; font-size: 11px;">${group.description}</span>` : ''}` : 
+            '<br>Individual Head'
+          }`)
           .style("left", (event.pageX + 10) + "px")
           .style("top", (event.pageY - 10) + "px");
 
@@ -893,11 +1052,36 @@ const AttentionFlowGraph = () => {
         .on("click", () => changeGroupColor(group.id));
       
       // Add group name
-      legend.append("text")
+      const groupText = legend.append("text")
         .attr("x", 25)
         .attr("y", y + 12)
         .attr("font-size", "12px")
-        .text(group.name);
+        .text(group.name)
+        .style("cursor", "pointer");
+      
+      // Add tooltip behavior for group description
+      if (group.description) {
+        groupText
+          .on("mouseenter", function(event: MouseEvent) {
+            const tooltipDiv = d3.select<HTMLDivElement, unknown>("#graph-tooltip");
+            tooltipDiv
+              .style("display", "block")
+              .style("position", "absolute")
+              .style("background", "white")
+              .style("padding", "6px 8px")
+              .style("border", "1px solid #ccc")
+              .style("border-radius", "4px")
+              .style("font-size", "12px")
+              .style("max-width", "250px")
+              .style("pointer-events", "none")
+              .html(`<strong>${group.name}</strong><br>${group.description}`)
+              .style("left", (event.pageX + 10) + "px")
+              .style("top", (event.pageY - 10) + "px");
+          })
+          .on("mouseleave", function() {
+            d3.select<HTMLDivElement, unknown>("#graph-tooltip").style("display", "none");
+          });
+      }
     });
 
     // Add separator
@@ -993,9 +1177,22 @@ const AttentionFlowGraph = () => {
     }
   }, [loading, backendAvailable, data]);
 
+  // Process default text on initial mount
+  useEffect(() => {
+    if (backendAvailable && textareaRef.current) {
+      // Get the default text for the current model
+      const defaultText = getDefaultTextForModel(currentModel);
+      
+      // Process the default text
+      debouncedFetchAttentionData(defaultText);
+    }
+  }, [backendAvailable, currentModel, debouncedFetchAttentionData, getDefaultTextForModel]);
+
   return (
     <>
       <style jsx>{sliderStyles}</style>
+      {/* Tooltip container that will be populated by D3 */}
+      <div id="graph-tooltip" style={{ display: 'none', position: 'absolute', zIndex: 1000 }}></div>
       <div className="flex flex-col gap-6 p-4 max-w-[1200px] mx-auto">
         <div className="flex justify-between items-start gap-6">
           <div className="flex-1">
@@ -1005,6 +1202,26 @@ const AttentionFlowGraph = () => {
               <div className="text-[#3B82F6] text-sm">Checking backend availability...</div>
             ) : (
               <div className="flex flex-col gap-6">
+                {/* Model Selector - Moved to the top */}
+                {backendAvailable && (
+                  <div className="p-4 border border-gray-100 rounded-lg bg-gray-50/80 shadow-[0_1px_2px_rgba(0,0,0,0.03)]">
+                    <label className="text-sm font-medium mb-2 block">Model</label>
+                    <select
+                      className="w-full p-2 text-sm bg-white border border-gray-200 rounded-md focus:border-[#3B82F6] focus:outline-none shadow-[0_1px_2px_rgba(0,0,0,0.02)]"
+                      value={currentModel}
+                      onChange={handleModelChange}
+                      disabled={loading}
+                    >
+                      {availableModels.map((model) => (
+                        <option key={model} value={model}>{model}</option>
+                      ))}
+                    </select>
+                    <div className="text-xs text-gray-600 mt-2">
+                      Predefined head groups are specific to the selected model.
+                    </div>
+                  </div>
+                )}
+                
                 {/* Controls Section */}
                 <div className="grid grid-cols-2 gap-6">
                   {/* Head Groups */}
@@ -1046,6 +1263,9 @@ const AttentionFlowGraph = () => {
                         return (
                           <div key={group.id} className="p-3 border border-gray-100 rounded-lg bg-white shadow-[0_1px_2px_rgba(0,0,0,0.02)]">
                             <div className="font-medium text-sm mb-2">{group.name}</div>
+                            {group.description && (
+                              <div className="text-xs text-gray-600 mb-2">{group.description}</div>
+                            )}
                             <div className="flex flex-wrap gap-1.5">
                               {predefinedGroup ? (
                                 // For predefined groups, show all possible vertices
@@ -1110,7 +1330,7 @@ const AttentionFlowGraph = () => {
                                     onClick={() => removeHead(layer, head)}
                                     className="px-2 py-0.5 rounded-l-md text-white text-xs hover:opacity-80"
                                     style={{
-                                      backgroundColor: d3.schemePaired[head % 12]
+                                      backgroundColor: colorPalette[head % colorPalette.length]
                                     }}
                                   >
                                     {layer},{head}
@@ -1119,7 +1339,7 @@ const AttentionFlowGraph = () => {
                                     <button
                                       className="px-1 py-0.5 rounded-r-md text-white text-xs hover:bg-black/20"
                                       style={{
-                                        backgroundColor: d3.schemePaired[head % 12]
+                                        backgroundColor: colorPalette[head % colorPalette.length]
                                       }}
                                       title="Add to group"
                                       onClick={(e) => {
@@ -1229,22 +1449,27 @@ const AttentionFlowGraph = () => {
                 {/* Text Input Section */}
                 {backendAvailable && (
                   <div className="p-4 border border-gray-100 rounded-lg bg-gray-50/80 shadow-[0_1px_2px_rgba(0,0,0,0.03)]">
-                    <label className="text-sm font-medium mb-3 block">Input Text</label>
-                    <textarea
-                      ref={textareaRef}
-                      className="w-full p-3 text-sm bg-[#F3F4F6] border-0 border-b border-transparent focus:border-[#3B82F6] focus:bg-white focus:outline-none transition-all duration-200 ease-in-out disabled:bg-gray-100 disabled:border-transparent disabled:cursor-not-allowed resize-none rounded-md shadow-[0_1px_2px_rgba(0,0,0,0.02)]"
-                      rows={2}
-                      placeholder="Enter text to analyze attention patterns..."
-                      onChange={(e) => debouncedFetchAttentionData(e.target.value)}
-                      disabled={loading || !backendAvailable}
-                      defaultValue={"When Mary and John went to the store, John gave a drink to"}
-                    />
-                    {loading && (
-                      <div className="text-xs text-[#3B82F6] mt-2">Loading attention patterns...</div>
-                    )}
-                    {textError && (
-                      <div className="text-xs text-red-500 mt-2">{textError}</div>
-                    )}
+                    <div className="flex flex-col space-y-4">
+                      {/* Text Input - Model selector removed from here */}
+                      <div>
+                        <label className="text-sm font-medium mb-2 block">Input Text</label>
+                        <textarea
+                          ref={textareaRef}
+                          className="w-full p-3 text-sm bg-[#F3F4F6] border-0 border-b border-transparent focus:border-[#3B82F6] focus:bg-white focus:outline-none transition-all duration-200 ease-in-out disabled:bg-gray-100 disabled:border-transparent disabled:cursor-not-allowed resize-none rounded-md shadow-[0_1px_2px_rgba(0,0,0,0.02)]"
+                          rows={2}
+                          placeholder="Enter text to analyze attention patterns..."
+                          onChange={(e) => debouncedFetchAttentionData(e.target.value)}
+                          disabled={loading || !backendAvailable}
+                          defaultValue={getDefaultTextForModel(currentModel)}
+                        />
+                        {loading && (
+                          <div className="text-xs text-[#3B82F6] mt-2">Loading attention patterns...</div>
+                        )}
+                        {textError && (
+                          <div className="text-xs text-red-500 mt-2">{textError}</div>
+                        )}
+                      </div>
+                    </div>
                   </div>
                 )}
 

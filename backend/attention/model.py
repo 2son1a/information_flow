@@ -4,6 +4,12 @@ from transformer_lens.head_detector import detect_head
 from typing import Dict, List, Tuple, Any
 import numpy as np
 
+# Available models
+AVAILABLE_MODELS = {
+    "gpt2-small": "gpt2-small",
+    "pythia-2.8b": "pythia-2.8b"
+}
+
 class AttentionPatternExtractor:
     def __init__(self, model_name: str = "gpt2-small"):
         """Initialize the model for attention pattern extraction.
@@ -11,9 +17,15 @@ class AttentionPatternExtractor:
         Args:
             model_name: Name of the pretrained model to use
         """
+        if model_name not in AVAILABLE_MODELS:
+            raise ValueError(f"Model {model_name} not supported. Available models: {', '.join(AVAILABLE_MODELS.keys())}")
+            
+        self.model_name = model_name
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        
+        print(f"Loading model {model_name} on {self.device}...")
         self.model = HookedTransformer.from_pretrained(
-            model_name,
+            AVAILABLE_MODELS[model_name],
             device=self.device,
             dtype=torch.float32
         )
@@ -22,6 +34,8 @@ class AttentionPatternExtractor:
         # Cache model configuration
         self.n_layers = self.model.cfg.n_layers
         self.n_heads = self.model.cfg.n_heads
+        
+        print(f"Model loaded: {model_name} with {self.n_layers} layers and {self.n_heads} heads")
         
     def get_attention_patterns(self, text: str) -> Dict[str, Any]:
         """Extract attention patterns from input text.
@@ -137,7 +151,14 @@ class AttentionPatternExtractor:
             "numTokens": len(tokens),
             "numHeads": self.n_heads,
             "tokens": tokens,
-            "attentionPatterns": attention_patterns
+            "attentionPatterns": attention_patterns,
+            "model_name": self.model_name,
+            "model_info": {
+                "name": self.model_name,
+                "layers": self.n_layers,
+                "heads": self.n_heads,
+                "architecture": AVAILABLE_MODELS[self.model_name]
+            }
         }
 
 # Example usage:
