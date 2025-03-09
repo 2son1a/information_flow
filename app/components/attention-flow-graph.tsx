@@ -253,30 +253,39 @@ const AttentionFlowGraph = () => {
       setTextError(null);
       setLoading(true);
       
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://0.0.0.0:8000';
+      // Get the API URL from environment or use default
+      let apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://0.0.0.0:8000';
+      
+      // If the API URL is using http and we're on https (like Vercel), try to use https for the API as well
+      if (typeof window !== 'undefined' && window.location.protocol === 'https:' && apiUrl.startsWith('http:')) {
+        const httpsUrl = apiUrl.replace('http:', 'https:');
+        console.log(`Trying HTTPS API URL: ${httpsUrl} (original: ${apiUrl})`);
+        apiUrl = httpsUrl;
+      }
+      
+      console.log(`Fetching attention data from: ${apiUrl}/process`);
+      
       const response = await fetch(`${apiUrl}/process`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ 
+        body: JSON.stringify({
           text,
           model_name: currentModel
-        })
+        }),
+        // Ensure credentials are included for CORS
+        credentials: 'include'
       });
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.detail || 'Failed to fetch attention data');
-      }
-
-      const data = await response.json();
-      setData(data);
       
-      // Restore focus to textarea after data is loaded
-      if (textareaRef.current) {
-        textareaRef.current.focus();
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error(`Error from API: ${response.status} - ${errorText}`);
+        throw new Error(`Error ${response.status}: ${errorText || 'Failed to fetch attention data'}`);
       }
+      
+      const result = await response.json();
+      setData(result);
     } catch (error) {
       console.error('Error fetching attention data:', error);
       setTextError(error instanceof Error ? error.message : 'Failed to fetch attention data');
@@ -306,48 +315,61 @@ const AttentionFlowGraph = () => {
   useEffect(() => {
     const checkBackend = async () => {
       try {
-        const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://0.0.0.0:8000';
-        const response = await fetch(`${apiUrl}/models`);
+        // Get the API URL from environment or use default
+        let apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://0.0.0.0:8000';
+        
+        // If the API URL is using http and we're on https (like Vercel), try to use https for the API as well
+        if (typeof window !== 'undefined' && window.location.protocol === 'https:' && apiUrl.startsWith('http:')) {
+          const httpsUrl = apiUrl.replace('http:', 'https:');
+          console.log(`Trying HTTPS API URL for backend check: ${httpsUrl} (original: ${apiUrl})`);
+          apiUrl = httpsUrl;
+        }
+        
+        console.log(`Checking backend at: ${apiUrl}/models`);
+        
+        const response = await fetch(`${apiUrl}/models`, {
+          credentials: 'include' // Include credentials for CORS
+        });
         
         if (response.ok) {
           const data = await response.json();
           setAvailableModels(data.models || ["gpt2-small", "pythia-2.8b"]);
           setBackendAvailable(true);
         } else {
-          console.warn("Backend health check failed, using sample data");
-          // Use sample data if backend is not available
-          if (Object.keys(sampleAttentionDataMap).length > 0) {
-            // Use the current model's data if available
-            if (sampleAttentionDataMap[currentModel]) {
-              setData(sampleAttentionDataMap[currentModel]);
-            } else {
-              // Otherwise use the first available model data
-              const firstModel = Object.keys(sampleAttentionDataMap)[0];
-              setData(sampleAttentionDataMap[firstModel]);
-              setCurrentModel(firstModel);
-            }
-          }
-          setBackendAvailable(false);
+          console.warn(`Backend health check failed with status: ${response.status}`, await response.text());
+          loadSampleData();
         }
       } catch (error) {
         console.error("Error checking backend:", error);
-        // Use sample data if backend check fails
-        if (Object.keys(sampleAttentionDataMap).length > 0) {
-          // Same logic as above
-          if (sampleAttentionDataMap[currentModel]) {
-            setData(sampleAttentionDataMap[currentModel]);
-          } else {
-            const firstModel = Object.keys(sampleAttentionDataMap)[0];
-            setData(sampleAttentionDataMap[firstModel]);
-            setCurrentModel(firstModel);
-          }
-        }
-        setBackendAvailable(false);
+        loadSampleData();
       }
     };
     
+    // Helper function to load sample data when backend is unavailable
+    const loadSampleData = () => {
+      console.log("Loading sample data due to backend unavailability");
+      // Use sample data if backend is not available
+      if (Object.keys(sampleAttentionDataMap).length > 0) {
+        // Use the current model's data if available
+        if (sampleAttentionDataMap[currentModel]) {
+          setData(sampleAttentionDataMap[currentModel]);
+        } else {
+          // Otherwise use the first available model data
+          const firstModel = Object.keys(sampleAttentionDataMap)[0];
+          setData(sampleAttentionDataMap[firstModel]);
+          setCurrentModel(firstModel);
+        }
+        
+        // Ensure we have at least one head selected when in sample mode
+        if (selectedHeads.length === 0) {
+          setSelectedHeads([{ layer: 0, head: 0 }]);
+        }
+      }
+      setBackendAvailable(false);
+    };
+    
     checkBackend();
-  }, [currentModel, sampleAttentionDataMap]);
+  }, [currentModel, sampleAttentionDataMap, selectedHeads.length]);
 
   // Get default text based on model
   const getDefaultTextForModel = useCallback((modelName: string): string => {
@@ -463,8 +485,15 @@ const AttentionFlowGraph = () => {
   useEffect(() => {
     if (sampleAttentionDataMap[currentModel]) {
       setData(sampleAttentionDataMap[currentModel]);
+      
+      // If no heads are selected and we're in sample data mode,
+      // select a default head to allow interaction
+      if (selectedHeads.length === 0 && !backendAvailable) {
+        // Choose first head of the first layer as default
+        setSelectedHeads([{ layer: 0, head: 0 }]);
+      }
     }
-  }, [currentModel, sampleAttentionDataMap]);
+  }, [currentModel, sampleAttentionDataMap, selectedHeads.length, backendAvailable]);
 
   useEffect(() => {
     const trackElement = document.querySelector('.custom-range-track') as HTMLDivElement;
