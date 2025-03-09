@@ -124,6 +124,7 @@ const AttentionFlowGraph = () => {
   const [groupError, setGroupError] = useState<string | null>(null);
   const [openDropdownId, setOpenDropdownId] = useState<string | null>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
   
   // Graph dimensions
   const graphDimensions = {
@@ -204,6 +205,11 @@ const AttentionFlowGraph = () => {
 
       const data = await response.json();
       setData(data);
+      
+      // Restore focus to textarea after data is loaded
+      if (textareaRef.current) {
+        textareaRef.current.focus();
+      }
     } catch (error) {
       console.error('Error fetching attention data:', error);
       setTextError(error instanceof Error ? error.message : 'Failed to fetch attention data');
@@ -212,11 +218,24 @@ const AttentionFlowGraph = () => {
     }
   }, []);
 
-  const debouncedFetchAttentionData = useCallback((text: string) => {
-    if (text.trim()) {
-      fetchAttentionData(text);
-    }
-  }, [fetchAttentionData]);
+  const debouncedFetchAttentionData = useCallback(
+    (() => {
+      let timeoutId: NodeJS.Timeout | null = null;
+      return (text: string) => {
+        if (timeoutId) {
+          clearTimeout(timeoutId);
+        }
+        
+        timeoutId = setTimeout(() => {
+          if (text.trim()) {
+            fetchAttentionData(text);
+          }
+          timeoutId = null;
+        }, 500); // 500ms debounce delay
+      };
+    })(),
+    [fetchAttentionData]
+  );
 
   // Initialize predefined head groups
   useEffect(() => {
@@ -966,6 +985,14 @@ const AttentionFlowGraph = () => {
     };
   }, []);
 
+  // Restore focus to textarea after any rendering that might have caused it to lose focus
+  useEffect(() => {
+    // Only focus if we're not loading and the backend is available
+    if (!loading && backendAvailable && textareaRef.current) {
+      textareaRef.current.focus();
+    }
+  }, [loading, backendAvailable, data]);
+
   return (
     <>
       <style jsx>{sliderStyles}</style>
@@ -1204,6 +1231,7 @@ const AttentionFlowGraph = () => {
                   <div className="p-4 border border-gray-100 rounded-lg bg-gray-50/80 shadow-[0_1px_2px_rgba(0,0,0,0.03)]">
                     <label className="text-sm font-medium mb-3 block">Input Text</label>
                     <textarea
+                      ref={textareaRef}
                       className="w-full p-3 text-sm bg-[#F3F4F6] border-0 border-b border-transparent focus:border-[#3B82F6] focus:bg-white focus:outline-none transition-all duration-200 ease-in-out disabled:bg-gray-100 disabled:border-transparent disabled:cursor-not-allowed resize-none rounded-md shadow-[0_1px_2px_rgba(0,0,0,0.02)]"
                       rows={2}
                       placeholder="Enter text to analyze attention patterns..."
