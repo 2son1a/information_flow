@@ -474,16 +474,22 @@ const AttentionFlowGraph = () => {
     }
   }, [threshold]);
 
-  const handleThresholdChange = (e: ChangeEvent<HTMLInputElement>) => {
-    const value = parseFloat(e.target.value);
-    setThreshold(value);
-    
-    // Update track width
+  // Update slider track position
+  const updateTrackPosition = (value: number) => {
     const trackElement = document.querySelector('.custom-range-track') as HTMLDivElement;
     if (trackElement) {
       const percentage = value * 100;
       trackElement.style.width = `${percentage}%`;
     }
+  };
+
+  // Handle threshold change
+  const handleThresholdChange = (e: ChangeEvent<HTMLInputElement>) => {
+    const value = parseFloat(e.target.value);
+    setThreshold(value);
+    
+    // Update track width
+    updateTrackPosition(value);
   };
 
   const handleHeadSelection = (input: string) => {
@@ -1239,25 +1245,23 @@ const AttentionFlowGraph = () => {
               <div className="text-[#3B82F6] text-sm">Checking backend availability...</div>
             ) : (
               <div className="flex flex-col gap-6">
-                {/* Model Selector - Moved to the top */}
-                {backendAvailable && (
-                  <div className="p-4 border border-gray-100 rounded-lg bg-gray-50/80 shadow-[0_1px_2px_rgba(0,0,0,0.03)]">
-                    <label className="text-sm font-medium mb-2 block">Model</label>
-                    <select
-                      className="w-full p-2 text-sm bg-white border border-gray-200 rounded-md focus:border-[#3B82F6] focus:outline-none shadow-[0_1px_2px_rgba(0,0,0,0.02)]"
-                      value={currentModel}
-                      onChange={handleModelChange}
-                      disabled={loading}
-                    >
-                      {availableModels.map((model) => (
-                        <option key={model} value={model}>{model}</option>
-                      ))}
-                    </select>
-                    <div className="text-xs text-gray-600 mt-2">
-                      Predefined head groups are specific to the selected model.
-                    </div>
+                {/* Model Selector - Always visible since we have model-specific sample data */}
+                <div className="p-4 border border-gray-100 rounded-lg bg-gray-50/80 shadow-[0_1px_2px_rgba(0,0,0,0.03)]">
+                  <label className="text-sm font-medium mb-2 block">Model</label>
+                  <select
+                    className="w-full p-2 text-sm bg-white border border-gray-200 rounded-md focus:border-[#3B82F6] focus:outline-none shadow-[0_1px_2px_rgba(0,0,0,0.02)]"
+                    value={currentModel}
+                    onChange={handleModelChange}
+                    disabled={loading}
+                  >
+                    {availableModels.map((model) => (
+                      <option key={model} value={model}>{model}</option>
+                    ))}
+                  </select>
+                  <div className="text-xs text-gray-600 mt-2">
+                    Predefined head groups are specific to the selected model.
                   </div>
-                )}
+                </div>
                 
                 {/* Controls Section */}
                 <div className="grid grid-cols-2 gap-6">
