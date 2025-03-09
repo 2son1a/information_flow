@@ -1,5 +1,6 @@
 import torch
 from transformer_lens import HookedTransformer
+from transformer_lens.head_detector import detect_head 
 from typing import Dict, List, Tuple, Any
 import numpy as np
 
@@ -60,6 +61,8 @@ class AttentionPatternExtractor:
         
         # Convert patterns to the expected format
         layer_attentions = []
+        head_types = {}
+
         for layer_idx, layer_pattern in enumerate(patterns):
             # layer_pattern shape: (n_heads, seq_len, seq_len)
             heads_attention = []
@@ -67,6 +70,8 @@ class AttentionPatternExtractor:
                 # Store the full attention matrix for each head
                 head_pattern = layer_pattern[head_idx]
                 heads_attention.append(head_pattern)
+                head_type = detect_head(self.model, layer_idx, head_idx)
+                head_types[(layer_idx, head_idx)] = head_type
             
             layer_attentions.append({
                 "layer": layer_idx,
@@ -75,7 +80,8 @@ class AttentionPatternExtractor:
         
         return {
             "tokens": tokens_list[1:],
-            "layerAttentions": layer_attentions
+            "layerAttentions": layer_attentions,
+            "headTypes": head_types
         }
 
     def process_text(self, text: str) -> Dict[str, Any]:
@@ -112,7 +118,8 @@ class AttentionPatternExtractor:
                             "destLayer": layer + 1,  # Next layer
                             "destToken": dest_idx,
                             "weight": weight,
-                            "head": head
+                            "head": head,
+                            "headType": layer_data["heads"][head]["type"]
                         })
         
         return {
