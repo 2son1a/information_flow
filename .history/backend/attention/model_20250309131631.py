@@ -70,16 +70,7 @@ class AttentionPatternExtractor:
                 # Store the full attention matrix for each head
                 head_pattern = layer_pattern[head_idx]
                 heads_attention.append(head_pattern)
-                try:
-                    head_type = detect_head(self.model, layer_idx, head_idx)
-                    # Convert int to string if necessary
-                    if isinstance(head_type, int):
-                        head_type = f"type_{head_type}"
-                    elif head_type is None:
-                        head_type = "unknown"
-                except Exception as e:
-                    print(f"Error detecting head type: {e}")
-                    head_type = "unknown"
+                head_type = detect_head(self.model, layer_idx, head_idx)
                 head_types[(layer_idx, head_idx)] = head_type
             
             layer_attentions.append({
