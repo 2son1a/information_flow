@@ -2,7 +2,6 @@
 
 import React, { useState, useEffect, useRef, ChangeEvent, useCallback, useMemo } from 'react';
 import * as d3 from 'd3';
-import sampleAttentionData from '../data/sample-attention.json';
 
 // Styles for custom range slider
 const sliderStyles = `
@@ -129,6 +128,7 @@ const AttentionFlowGraph = () => {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [currentModel, setCurrentModel] = useState<string>("gpt2-small");
   const [availableModels, setAvailableModels] = useState<string[]>(["gpt2-small", "pythia-2.8b"]);
+  const [sampleAttentionDataMap, setSampleAttentionDataMap] = useState<Record<string, any>>({});
   
   // Graph dimensions
   const graphDimensions = {
@@ -318,23 +318,47 @@ const AttentionFlowGraph = () => {
     const checkBackend = async () => {
       try {
         const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://0.0.0.0:8000';
-        const response = await fetch(`${apiUrl}/health`);
+        const response = await fetch(`${apiUrl}/models`);
         
         if (response.ok) {
+          const data = await response.json();
+          setAvailableModels(data.models || ["gpt2-small", "pythia-2.8b"]);
           setBackendAvailable(true);
-          // Fetch available models
-          fetchAvailableModels();
         } else {
+          console.warn("Backend health check failed, using sample data");
+          // Use sample data if backend is not available
+          if (Object.keys(sampleAttentionDataMap).length > 0) {
+            // Use the current model's data if available
+            if (sampleAttentionDataMap[currentModel]) {
+              setData(sampleAttentionDataMap[currentModel]);
+            } else {
+              // Otherwise use the first available model data
+              const firstModel = Object.keys(sampleAttentionDataMap)[0];
+              setData(sampleAttentionDataMap[firstModel]);
+              setCurrentModel(firstModel);
+            }
+          }
           setBackendAvailable(false);
         }
       } catch (error) {
-        console.error('Backend not available:', error);
+        console.error("Error checking backend:", error);
+        // Use sample data if backend check fails
+        if (Object.keys(sampleAttentionDataMap).length > 0) {
+          // Same logic as above
+          if (sampleAttentionDataMap[currentModel]) {
+            setData(sampleAttentionDataMap[currentModel]);
+          } else {
+            const firstModel = Object.keys(sampleAttentionDataMap)[0];
+            setData(sampleAttentionDataMap[firstModel]);
+            setCurrentModel(firstModel);
+          }
+        }
         setBackendAvailable(false);
       }
     };
     
     checkBackend();
-  }, [fetchAvailableModels]);
+  }, [currentModel, sampleAttentionDataMap]);
 
   // Get default text based on model
   const getDefaultTextForModel = useCallback((modelName: string): string => {
@@ -351,22 +375,21 @@ const AttentionFlowGraph = () => {
 
   // Handle model change
   const handleModelChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    const rawModelName = e.target.value;
+    const newModel = e.target.value;
+    setCurrentModel(newModel);
     
-    console.log("Model changed to:", rawModelName);
-    console.log("Available predefined groups:", Object.keys(modelSpecificGroups));
-    
-    setCurrentModel(rawModelName);
+    // Reset selections when changing models
+    setSelectedHeads([]);
     
     // Get default layer and token counts based on the model
     let defaultLayers = 4;
     let defaultTokens = 5;
     
     // Set appropriate defaults based on model
-    if (rawModelName.toLowerCase().includes('gpt2')) {
+    if (newModel.toLowerCase().includes('gpt2')) {
       defaultLayers = 12;  // GPT2 has 12 layers
       defaultTokens = 5;
-    } else if (rawModelName.toLowerCase().includes('pythia')) {
+    } else if (newModel.toLowerCase().includes('pythia')) {
       defaultLayers = 32;  // Pythia-2.8b has 32 layers
       defaultTokens = 5;
     }
@@ -381,17 +404,14 @@ const AttentionFlowGraph = () => {
     setData({
       numLayers: defaultLayers,
       numTokens: defaultTokens,
-      numHeads: rawModelName.toLowerCase().includes('pythia') ? 32 : 12,  // Pythia has 32 heads, GPT2 has 12
+      numHeads: newModel.toLowerCase().includes('pythia') ? 32 : 12,  // Pythia has 32 heads, GPT2 has 12
       attentionPatterns: [],
       tokens: Array(defaultTokens).fill('token')
     });
     
-    // Clear selected heads when model changes
-    setSelectedHeads([]);
-    
     // Set model-specific default text
     if (textareaRef.current) {
-      const defaultText = getDefaultTextForModel(rawModelName);
+      const defaultText = getDefaultTextForModel(newModel);
       textareaRef.current.value = defaultText;
       
       // Process the default text immediately
@@ -411,23 +431,51 @@ const AttentionFlowGraph = () => {
     setHeadGroups(initialGroups);
   }, [predefinedGroups, currentModel]);
 
-  // Load appropriate data based on backend availability
+  // Load model-specific sample data
   useEffect(() => {
-    if (backendAvailable === false) {
-      // Fix the linter error by providing valid GraphData
-      setData({
-        numLayers: 4,
-        numTokens: 5,
-        numHeads: 4,
-        attentionPatterns: [],
-        tokens: Array(5).fill('token')
-      });
-      setSelectedHeads([{ layer: 0, head: 0 }]);
-    } else if (backendAvailable === true) {
-      const defaultText = "When Mary and John went to the store, John gave a drink to";
-      fetchAttentionData(defaultText);
+    // Function to load sample data for a model
+    const loadSampleData = async (modelName: string) => {
+      try {
+        const response = await fetch(`/data/sample-attention-${modelName}.json`);
+        if (response.ok) {
+          const data = await response.json();
+          return data;
+        } else {
+          console.error(`Failed to load sample data for model ${modelName}`);
+          return null;
+        }
+      } catch (error) {
+        console.error(`Error loading sample data for model ${modelName}:`, error);
+        return null;
+      }
+    };
+
+    // Try to load sample data for all available models
+    const loadAllSampleData = async () => {
+      const dataMap: Record<string, any> = {};
+      for (const model of availableModels) {
+        const modelData = await loadSampleData(model);
+        if (modelData) {
+          dataMap[model] = modelData;
+        }
+      }
+      setSampleAttentionDataMap(dataMap);
+      
+      // Initialize with current model's data if available
+      if (dataMap[currentModel]) {
+        setData(dataMap[currentModel]);
+      }
+    };
+    
+    loadAllSampleData();
+  }, [availableModels]);
+  
+  // Update data when model changes
+  useEffect(() => {
+    if (sampleAttentionDataMap[currentModel]) {
+      setData(sampleAttentionDataMap[currentModel]);
     }
-  }, [backendAvailable, fetchAttentionData]);
+  }, [currentModel, sampleAttentionDataMap]);
 
   useEffect(() => {
     const trackElement = document.querySelector('.custom-range-track') as HTMLDivElement;

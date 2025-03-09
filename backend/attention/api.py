@@ -86,7 +86,7 @@ async def process_text(request: TextRequest) -> Dict[str, Any]:
 async def list_models():
     """List available models."""
     return {
-        "available_models": list(AVAILABLE_MODELS.keys()),
+        "models": list(AVAILABLE_MODELS.keys()),
         "loaded_models": list(model_registry.keys())
     }
 
