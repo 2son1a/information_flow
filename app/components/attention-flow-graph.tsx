@@ -1056,7 +1056,7 @@ const AttentionFlowGraph = () => {
                                   ))
                                 ) : (
                                   <div className="text-xs text-gray-500 italic">
-                                    Add heads from the "Individual Heads" section
+                                    Add heads from the &quot;Individual Heads&quot; section
                                   </div>
                                 )
                               )}
