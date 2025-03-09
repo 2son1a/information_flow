@@ -4,6 +4,57 @@ import React, { useState, useEffect, useRef, ChangeEvent, useCallback, useMemo }
 import * as d3 from 'd3';
 import sampleAttentionData from '../data/sample-attention.json';
 
+// Styles for custom range slider
+const sliderStyles = `
+  .custom-range {
+    @apply appearance-none bg-transparent w-full h-6 cursor-pointer;
+  }
+  
+  .custom-range::-webkit-slider-runnable-track {
+    @apply h-[6px] rounded-full bg-gradient-to-r from-gray-200 to-gray-300;
+  }
+  
+  .custom-range::-webkit-slider-thumb {
+    @apply appearance-none h-4 w-4 rounded-full bg-white border border-[#3B82F6] shadow-md -mt-[4px];
+    background: linear-gradient(to bottom, #ffffff, #f5f7fa);
+  }
+  
+  .custom-range::-moz-range-track {
+    @apply h-[6px] rounded-full bg-gradient-to-r from-gray-200 to-gray-300;
+  }
+  
+  .custom-range::-moz-range-thumb {
+    @apply h-4 w-4 rounded-full bg-white border border-[#3B82F6] shadow-md;
+    background: linear-gradient(to bottom, #ffffff, #f5f7fa);
+  }
+  
+  .custom-range:focus {
+    @apply outline-none;
+  }
+  
+  .custom-range:focus::-webkit-slider-thumb {
+    @apply border-[#3B82F6] shadow-lg;
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+  }
+  
+  .custom-range:focus::-moz-range-thumb {
+    @apply border-[#3B82F6] shadow-lg;
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+  }
+  
+  /* Add colored track for active portion */
+  .custom-range-wrapper {
+    @apply relative w-full;
+  }
+  
+  .custom-range-track {
+    @apply absolute pointer-events-none h-[6px] bg-gradient-to-r from-[#3B82F6] to-[#60A5FA] rounded-full;
+    top: 50%;
+    transform: translateY(-50%);
+    z-index: 0;
+  }
+`;
+
 interface AttentionPattern {
   sourceLayer: number;
   sourceToken: number;
@@ -67,7 +118,12 @@ const AttentionFlowGraph = () => {
   const [headGroups, setHeadGroups] = useState<HeadGroup[]>([]);
   const [backendAvailable, setBackendAvailable] = useState<boolean | null>(null);
   const svgRef = useRef(null);
-  const [error, setError] = useState<string | null>(null);
+  const [headError, setHeadError] = useState<string | null>(null);
+  const [textError, setTextError] = useState<string | null>(null);
+  const [newGroupName, setNewGroupName] = useState<string>('');
+  const [groupError, setGroupError] = useState<string | null>(null);
+  const [openDropdownId, setOpenDropdownId] = useState<string | null>(null);
+  const dropdownRef = useRef<HTMLDivElement>(null);
   
   // Graph dimensions
   const graphDimensions = {
@@ -129,7 +185,7 @@ const AttentionFlowGraph = () => {
 
   const fetchAttentionData = useCallback(async (text: string) => {
     try {
-      setError(null);
+      setTextError(null);
       setLoading(true);
       
       const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
@@ -150,7 +206,7 @@ const AttentionFlowGraph = () => {
       setData(data);
     } catch (error) {
       console.error('Error fetching attention data:', error);
-      setError(error instanceof Error ? error.message : 'Failed to fetch attention data');
+      setTextError(error instanceof Error ? error.message : 'Failed to fetch attention data');
     } finally {
       setLoading(false);
     }
@@ -199,8 +255,24 @@ const AttentionFlowGraph = () => {
     }
   }, [backendAvailable, fetchAttentionData]);
 
+  useEffect(() => {
+    const trackElement = document.querySelector('.custom-range-track') as HTMLDivElement;
+    if (trackElement) {
+      const percentage = threshold * 100;
+      trackElement.style.width = `${percentage}%`;
+    }
+  }, [threshold]);
+
   const handleThresholdChange = (e: ChangeEvent<HTMLInputElement>) => {
-    setThreshold(parseFloat(e.target.value));
+    const value = parseFloat(e.target.value);
+    setThreshold(value);
+    
+    // Update track width
+    const trackElement = document.querySelector('.custom-range-track') as HTMLDivElement;
+    if (trackElement) {
+      const percentage = value * 100;
+      trackElement.style.width = `${percentage}%`;
+    }
   };
 
   const handleHeadSelection = (input: string) => {
@@ -210,32 +282,32 @@ const AttentionFlowGraph = () => {
 
       const parts = line.split(',');
       if (parts.length !== 2) {
-        setError("Invalid format. Please use 'layer,head' format (e.g., '0,1')");
+        setHeadError("Invalid format. Please use 'layer,head' format (e.g., '0,1')");
         return;
       }
 
       const [layer, head] = parts.map(num => parseInt(num.trim()));
       if (isNaN(layer) || isNaN(head)) {
-        setError("Layer and head must be numbers");
+        setHeadError("Layer and head must be numbers");
         return;
       }
 
       if (layer < 0 || head < 0 || layer >= data.numLayers || head >= data.numHeads) {
-        setError(`Layer must be 0-${data.numLayers - 1} and head must be 0-${data.numHeads - 1}`);
+        setHeadError(`Layer must be 0-${data.numLayers - 1} and head must be 0-${data.numHeads - 1}`);
         return;
       }
 
       if (getHeadGroup(layer, head) === null && 
           !selectedHeads.some(h => h.layer === layer && h.head === head)) {
         setSelectedHeads(prev => [...prev, { layer, head }]);
-        setError(null);
+        setHeadError(null);
       } else if (getHeadGroup(layer, head) !== null) {
-        setError("This head is already part of a group");
+        setHeadError("This head is already part of a group");
       } else {
-        setError("This head is already selected");
+        setHeadError("This head is already selected");
       }
     } catch {
-      setError("Invalid input format");
+      setHeadError("Invalid input format");
     }
   };
 
@@ -261,8 +333,127 @@ const AttentionFlowGraph = () => {
     });
   };
 
-  const removeHead = (layer: number, head: number) => {
-    setSelectedHeads(prev => prev.filter(h => !(h.layer === layer && h.head === head)));
+  const removeHead = (layer: number, head: number, groupId?: number) => {
+    if (groupId !== undefined) {
+      // Remove from a specific group
+      setHeadGroups(prev => prev.map(group => {
+        if (group.id === groupId) {
+          return {
+            ...group,
+            heads: group.heads.filter(h => !(h.layer === layer && h.head === head))
+          };
+        }
+        return group;
+      }));
+    } else {
+      // Remove from selected heads
+      setSelectedHeads(prev => prev.filter(h => !(h.layer === layer && h.head === head)));
+    }
+  };
+
+  // Add function to create a new head group
+  const createNewGroup = (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    // Validate group name
+    if (!newGroupName.trim()) {
+      setGroupError("Group name is required");
+      return;
+    }
+    
+    // Check for duplicate names
+    if (headGroups.some(g => g.name.toLowerCase() === newGroupName.trim().toLowerCase())) {
+      setGroupError("A group with this name already exists");
+      return;
+    }
+    
+    // Create new group
+    const newGroup: HeadGroup = {
+      id: headGroups.length > 0 ? Math.max(...headGroups.map(g => g.id)) + 1 : 0,
+      name: newGroupName.trim(),
+      heads: [],
+    };
+    
+    // Add new group at the beginning of the array so it appears at the top
+    setHeadGroups(prev => [newGroup, ...prev]);
+    setNewGroupName('');
+    setGroupError(null);
+  };
+
+  // Array of vibrant colors (our preferred palette)
+  const colorPalette = useMemo(() => [
+    "#3B82F6", // Blue
+    "#EF4444", // Red
+    "#10B981", // Green
+    "#F59E0B", // Amber
+    "#8B5CF6", // Purple
+    "#EC4899", // Pink
+    "#06B6D4", // Cyan
+    "#F97316", // Orange
+    "#14B8A6", // Teal
+    "#6366F1", // Indigo
+    "#84CC16", // Lime
+    "#A855F7", // Purple-500
+    "#D946EF", // Fuchsia
+    "#22D3EE", // Cyan-400
+    "#2DD4BF", // Teal-400
+    "#4ADE80", // Green-400
+    "#FB7185", // Rose-400
+    "#C084FC", // Purple-400
+    "#34D399", // Emerald-400
+    "#F472B6"  // Pink-400
+  ], []);
+
+  // Add array to store custom colors for groups
+  const [groupColors, setGroupColors] = useState<Record<number, string>>({});
+  
+  // Initialize group colors with our preferred palette when headGroups changes
+  useEffect(() => {
+    // Only assign initial colors if we haven't assigned any yet
+    if (Object.keys(groupColors).length === 0 && headGroups.length > 0) {
+      const initialColors: Record<number, string> = {};
+      
+      headGroups.forEach((group, index) => {
+        initialColors[group.id] = colorPalette[index % colorPalette.length];
+      });
+      
+      setGroupColors(initialColors);
+    }
+  }, [headGroups, groupColors, colorPalette]);
+
+  // Function to get a random color that isn't already in use
+  const getRandomColor = (groupId: number) => {
+    // Get all colors currently in use
+    const usedColors = Object.values(groupColors);
+    
+    // Filter out colors that are already in use
+    const availableOptions = colorPalette.filter(color => !usedColors.includes(color));
+    
+    // If no available colors, use a random one from our palette
+    if (availableOptions.length === 0) {
+      return colorPalette[Math.floor(Math.random() * colorPalette.length)];
+    }
+    
+    // Pick a random color from the available options
+    const randomIndex = Math.floor(Math.random() * availableOptions.length);
+    return availableOptions[randomIndex];
+  };
+
+  // Function to change a group's color
+  const changeGroupColor = (groupId: number) => {
+    const newColor = getRandomColor(groupId);
+    setGroupColors(prev => ({
+      ...prev,
+      [groupId]: newColor
+    }));
+  };
+
+  // Function to get color for a group, using custom color if available
+  const getGroupColor = (groupId: number) => {
+    if (groupColors[groupId]) {
+      return groupColors[groupId];
+    }
+    return colorPalette[groupId % colorPalette.length];
   };
 
   // Memoize drawGraph to prevent infinite loops
@@ -297,7 +488,7 @@ const AttentionFlowGraph = () => {
     const groupColorScale = d3.scaleOrdinal(d3.schemeTableau10)
       .domain(headGroups.map(g => g.id.toString()));
     
-    const individualHeadColorScale = d3.scaleOrdinal(d3.schemePaired)
+    const individualHeadColorScale = d3.scaleOrdinal(colorPalette)
       .domain(Array.from({length: data.numHeads}, (_, i) => i.toString()));
     
     // Filter edges based on threshold and visible heads
@@ -384,10 +575,12 @@ const AttentionFlowGraph = () => {
                `${target.x} ${target.y}`;
       })
       .attr("fill", "none")
-      .attr("stroke", (d: Link) => d.groupId === -1 
-        ? individualHeadColorScale(d.head.toString())
-        : groupColorScale(d.groupId.toString())
-      )
+      .attr("stroke", (d: Link) => {
+        if (d.groupId === -1) {
+          return individualHeadColorScale(d.head.toString());
+        }
+        return getGroupColor(d.groupId);
+      })
       .attr("stroke-width", 4)
       .attr("opacity", 0.6)
       .attr("data-source", (d: Link) => d.source)
@@ -572,13 +765,15 @@ const AttentionFlowGraph = () => {
     headGroups.forEach((group, i) => {
       const y = 30 + i * 25;
       
-      // Add color rectangle
+      // Add color rectangle with click handler
       legend.append("rect")
         .attr("x", 0)
         .attr("y", y)
         .attr("width", 15)
         .attr("height", 15)
-        .attr("fill", groupColorScale(group.id.toString()));
+        .attr("fill", getGroupColor(group.id))
+        .style("cursor", "pointer")
+        .on("click", () => changeGroupColor(group.id));
       
       // Add group name
       legend.append("text")
@@ -642,8 +837,9 @@ const AttentionFlowGraph = () => {
     data, 
     threshold, 
     selectedHeads, 
-    headGroups, 
-    getHeadGroup, 
+    headGroups,
+    groupColors,
+    getGroupColor,
     getVisibleHeads, 
     graphDimensions.height, 
     graphDimensions.width, 
@@ -656,171 +852,298 @@ const AttentionFlowGraph = () => {
     drawGraph();
   }, [data, threshold, selectedHeads, headGroups, drawGraph]);
 
+  // Add function to handle clicks outside the dropdown
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Element)) {
+        setOpenDropdownId(null);
+      }
+    }
+    
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, []);
+
   return (
-    <div className="flex flex-col gap-4 p-4 max-w-[1200px] mx-auto">
-      <div className="flex justify-between items-start gap-4">
-        <div className="flex-1">
-          <h2 className="text-white text-2xl font-medium-bold mb-3">Attention Flow Graph</h2>
-          
-          {backendAvailable === null ? (
-            <div className="text-blue-500 text-sm">Checking backend availability...</div>
-          ) : (
-            <div className="flex flex-col gap-4">
-              {/* Controls Section */}
-              <div className="grid grid-cols-2 gap-4">
-                {/* Head Groups */}
-                <div className="p-3 border rounded bg-gray-50">
-                  <label className="text-sm font-medium">Head Groups</label>
-                  <div className="space-y-2 mt-2 max-h-[200px] overflow-y-auto">
-                    {headGroups.map(group => {
-                      const predefinedGroup = predefinedGroups.find(g => g.name === group.name);
-                      if (!predefinedGroup) return null;
-                      
-                      return (
-                        <div key={group.id} className="p-2 border rounded bg-white">
-                          <div className="font-medium text-sm mb-2">{group.name}</div>
-                          <div className="flex flex-wrap gap-1.5">
-                            {predefinedGroup.vertices.map(([layer, head]) => (
-                              <button
-                                key={`${layer}-${head}`}
-                                onClick={() => addHeadToGroup(layer, head, group.id)}
-                                className="px-2 py-0.5 rounded text-xs transition-colors duration-200"
-                                style={{
-                                  backgroundColor: group.heads.some(h => h.layer === layer && h.head === head)
-                                    ? d3.schemeTableau10[group.id % 10]
-                                    : '#f3f4f6',
-                                  color: group.heads.some(h => h.layer === layer && h.head === head)
-                                    ? 'white'
-                                    : '#374151'
-                                }}
-                              >
-                                {layer},{head}
-                              </button>
-                            ))}
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-
-                {/* Individual Heads */}
-                <div className="p-3 border rounded bg-gray-50">
-                  <label className="text-sm font-medium">Individual Heads</label>
-                  <div className="space-y-3 mt-2">
-                    <div>
-                      <div className="text-xs text-gray-600 mb-2">Selected heads:</div>
-                      <div className="flex flex-wrap gap-1.5 min-h-[28px] p-2 bg-white rounded border">
-                        {selectedHeads.map(({ layer, head }) => (
-                          <button
-                            key={`${layer}-${head}`}
-                            onClick={() => removeHead(layer, head)}
-                            className="px-2 py-0.5 rounded text-white text-xs hover:opacity-80"
-                            style={{
-                              backgroundColor: d3.schemePaired[head % 12]
-                            }}
-                          >
-                            {layer},{head}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-
-                    <div>
-                      <form onSubmit={(e) => {
-                        e.preventDefault();
-                        const input = e.currentTarget.querySelector('input') as HTMLInputElement;
-                        handleHeadSelection(input.value);
-                        input.value = '';
-                      }}>
-                        <div className="flex gap-2">
+    <>
+      <style jsx>{sliderStyles}</style>
+      <div className="flex flex-col gap-6 p-4 max-w-[1200px] mx-auto">
+        <div className="flex justify-between items-start gap-6">
+          <div className="flex-1">
+            <h2 className="text-white text-2xl font-medium-bold mb-4">Attention Flow Graph</h2>
+            
+            {backendAvailable === null ? (
+              <div className="text-[#3B82F6] text-sm">Checking backend availability...</div>
+            ) : (
+              <div className="flex flex-col gap-6">
+                {/* Controls Section */}
+                <div className="grid grid-cols-2 gap-6">
+                  {/* Head Groups */}
+                  <div className="p-4 border border-gray-100 rounded-lg bg-gray-50/80 shadow-[0_1px_2px_rgba(0,0,0,0.03)]">
+                    <label className="text-sm font-medium mb-3 block">Head Groups</label>
+                    
+                    {/* Add new group form */}
+                    <div className="mb-3 pb-3 border-b border-gray-100">
+                      <form onSubmit={createNewGroup}>
+                        <div className="flex gap-2 mb-2">
                           <input
                             type="text"
-                            className="flex-1 px-2 py-1.5 border rounded text-xs font-mono bg-white"
-                            placeholder="layer,head (e.g. 0,1)"
+                            className="flex-1 px-3 py-2 text-xs font-mono bg-white border-b border-gray-200 focus:border-[#3B82F6] focus:outline-none transition-colors rounded-md shadow-[0_1px_2px_rgba(0,0,0,0.02)]"
+                            placeholder="New group name"
+                            value={newGroupName}
+                            onChange={(e) => setNewGroupName(e.target.value)}
                           />
                           <button
                             type="submit"
-                            className="px-3 py-1.5 bg-blue-500 text-white rounded text-xs hover:bg-blue-600 transition-colors"
+                            className="px-3 py-2 bg-[#3B82F6] text-white rounded-md text-xs hover:bg-[#2563EB] transition-colors shadow-[0_1px_2px_rgba(0,0,0,0.1)]"
                           >
-                            Add
+                            Create
                           </button>
                         </div>
+                        {groupError && (
+                          <div className="text-xs text-red-500 mt-1">{groupError}</div>
+                        )}
+                        <div className="text-xs text-gray-600 mt-1">
+                          Create a new group to organize attention heads
+                        </div>
                       </form>
-                      {error && (
-                        <div className="text-xs text-red-500 mt-1.5">{error}</div>
-                      )}
-                      <div className="text-xs text-gray-600 mt-1.5">
-                        Valid: Layer (0-{data.numLayers - 1}), Head (0-{data.numHeads - 1})
+                    </div>
+                    
+                    <div className="space-y-3 max-h-[200px] overflow-y-auto">
+                      {headGroups.map(group => {
+                        // For predefined groups, use the predefined vertices
+                        const predefinedGroup = predefinedGroups.find(g => g.name === group.name);
+                        
+                        return (
+                          <div key={group.id} className="p-3 border border-gray-100 rounded-lg bg-white shadow-[0_1px_2px_rgba(0,0,0,0.02)]">
+                            <div className="font-medium text-sm mb-2">{group.name}</div>
+                            <div className="flex flex-wrap gap-1.5">
+                              {predefinedGroup ? (
+                                // For predefined groups, show all possible vertices
+                                predefinedGroup.vertices.map(([layer, head]) => (
+                                  <button
+                                    key={`${layer}-${head}`}
+                                    onClick={() => addHeadToGroup(layer, head, group.id)}
+                                    className="px-2 py-0.5 rounded-md text-xs transition-colors duration-200"
+                                    style={{
+                                      backgroundColor: group.heads.some(h => h.layer === layer && h.head === head)
+                                        ? getGroupColor(group.id)
+                                        : '#f3f4f6',
+                                      color: group.heads.some(h => h.layer === layer && h.head === head)
+                                        ? 'white'
+                                        : '#374151'
+                                    }}
+                                  >
+                                    {layer},{head}
+                                  </button>
+                                ))
+                              ) : (
+                                // For custom groups, just show the added heads
+                                group.heads.length > 0 ? (
+                                  group.heads.map(({layer, head}) => (
+                                    <button
+                                      key={`${layer}-${head}`}
+                                      onClick={() => removeHead(layer, head, group.id)}
+                                      className="px-2 py-0.5 rounded-md text-white text-xs hover:opacity-80"
+                                      style={{
+                                        backgroundColor: getGroupColor(group.id)
+                                      }}
+                                    >
+                                      {layer},{head}
+                                    </button>
+                                  ))
+                                ) : (
+                                  <div className="text-xs text-gray-500 italic">
+                                    Add heads from the "Individual Heads" section
+                                  </div>
+                                )
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Individual Heads */}
+                  <div className="p-4 border border-gray-100 rounded-lg bg-gray-50/80 shadow-[0_1px_2px_rgba(0,0,0,0.03)]">
+                    <label className="text-sm font-medium mb-3 block">Individual Heads</label>
+                    <div className="space-y-3">
+                      <div>
+                        <div className="text-xs text-gray-600 mb-2">Selected heads:</div>
+                        <div className="flex flex-wrap gap-1.5 min-h-[28px] p-3 bg-white rounded-lg border border-gray-100 shadow-[0_1px_2px_rgba(0,0,0,0.02)]">
+                          {selectedHeads.map(({ layer, head }) => {
+                            const headId = `${layer}-${head}`;
+                            return (
+                              <div key={headId} className="relative">
+                                <div className="flex">
+                                  <button
+                                    onClick={() => removeHead(layer, head)}
+                                    className="px-2 py-0.5 rounded-l-md text-white text-xs hover:opacity-80"
+                                    style={{
+                                      backgroundColor: d3.schemePaired[head % 12]
+                                    }}
+                                  >
+                                    {layer},{head}
+                                  </button>
+                                  {headGroups.length > 0 && (
+                                    <button
+                                      className="px-1 py-0.5 rounded-r-md text-white text-xs hover:bg-black/20"
+                                      style={{
+                                        backgroundColor: d3.schemePaired[head % 12]
+                                      }}
+                                      title="Add to group"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        setOpenDropdownId(openDropdownId === headId ? null : headId);
+                                      }}
+                                    >
+                                      +
+                                    </button>
+                                  )}
+                                </div>
+                                
+                                {/* Dropdown for groups */}
+                                {openDropdownId === headId && (
+                                  <div 
+                                    ref={dropdownRef}
+                                    className="absolute right-0 top-full mt-1 bg-white shadow-md rounded-md border border-gray-100 z-10 w-48"
+                                  >
+                                    <div className="py-1 max-h-[150px] overflow-y-auto">
+                                      {headGroups.map(group => (
+                                        <button
+                                          key={group.id}
+                                          className="w-full text-left px-3 py-1.5 text-xs hover:bg-gray-100 truncate"
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            addHeadToGroup(layer, head, group.id);
+                                            removeHead(layer, head);
+                                            setOpenDropdownId(null);
+                                          }}
+                                        >
+                                          {group.name}
+                                        </button>
+                                      ))}
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
+                          {selectedHeads.length === 0 && (
+                            <div className="text-xs text-gray-500 italic px-1">
+                              No heads selected
+                            </div>
+                          )}
+                        </div>
+                        <div className="mt-2 flex flex-wrap gap-1.5">
+                          <div className="text-xs text-gray-600 italic w-full">
+                            ↑ Click + to add a head to a group
+                          </div>
+                        </div>
+                      </div>
+
+                      <div>
+                        <form onSubmit={(e) => {
+                          e.preventDefault();
+                          const input = e.currentTarget.querySelector('input') as HTMLInputElement;
+                          handleHeadSelection(input.value);
+                          input.value = '';
+                        }}>
+                          <div className="flex gap-2">
+                            <input
+                              type="text"
+                              className="flex-1 px-3 py-2 text-xs font-mono bg-white border-b border-gray-200 focus:border-[#3B82F6] focus:outline-none transition-colors rounded-md shadow-[0_1px_2px_rgba(0,0,0,0.02)]"
+                              placeholder="layer,head (e.g. 0,1)"
+                            />
+                            <button
+                              type="submit"
+                              className="px-3 py-2 bg-[#3B82F6] text-white rounded-md text-xs hover:bg-[#2563EB] transition-colors shadow-[0_1px_2px_rgba(0,0,0,0.1)]"
+                            >
+                              Add
+                            </button>
+                          </div>
+                        </form>
+                        {headError && (
+                          <div className="text-xs text-red-500 mt-2">{headError}</div>
+                        )}
+                        <div className="text-xs text-gray-600 mt-2">
+                          Valid: Layer (0-{data.numLayers - 1}), Head (0-{data.numHeads - 1})
+                        </div>
                       </div>
                     </div>
                   </div>
                 </div>
+
+                {/* Threshold Control - More compact design */}
+                <div className="p-3 border border-gray-100 rounded-lg bg-gray-50/80 shadow-[0_1px_2px_rgba(0,0,0,0.03)]">
+                  <div className="flex items-center gap-3">
+                    <label className="text-sm font-medium flex-shrink-0">Edge Weight:</label>
+                    <span className="text-xs font-mono w-10 text-right bg-transparent border-b border-gray-100 px-1 flex-shrink-0">
+                      {threshold.toFixed(2)}
+                    </span>
+                    <div className="custom-range-wrapper flex-1">
+                      <div className="custom-range-track" style={{ width: `${threshold * 100}%` }}></div>
+                      <input 
+                        type="range" 
+                        min="0" 
+                        max="1" 
+                        step="0.01" 
+                        value={threshold} 
+                        onChange={handleThresholdChange}
+                        className="custom-range relative z-10" 
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Text Input Section */}
+                {backendAvailable && (
+                  <div className="p-4 border border-gray-100 rounded-lg bg-gray-50/80 shadow-[0_1px_2px_rgba(0,0,0,0.03)]">
+                    <label className="text-sm font-medium mb-3 block">Input Text</label>
+                    <textarea
+                      className="w-full p-3 text-sm bg-[#F3F4F6] border-0 border-b border-transparent focus:border-[#3B82F6] focus:bg-white focus:outline-none transition-all duration-200 ease-in-out disabled:bg-gray-100 disabled:border-transparent disabled:cursor-not-allowed resize-none rounded-md shadow-[0_1px_2px_rgba(0,0,0,0.02)]"
+                      rows={2}
+                      placeholder="Enter text to analyze attention patterns..."
+                      onChange={(e) => debouncedFetchAttentionData(e.target.value)}
+                      disabled={loading || !backendAvailable}
+                      defaultValue="When Mary and John went to the store, John gave a drink to"
+                    />
+                    {loading && (
+                      <div className="text-xs text-[#3B82F6] mt-2">Loading attention patterns...</div>
+                    )}
+                    {textError && (
+                      <div className="text-xs text-red-500 mt-2">{textError}</div>
+                    )}
+                  </div>
+                )}
+
+                {!backendAvailable && (
+                  <div className="p-4 border border-gray-100 rounded-lg bg-yellow-50/80 text-xs shadow-[0_1px_2px_rgba(0,0,0,0.03)]">
+                    <p className="text-yellow-800">
+                      Backend is not available. Showing sample attention patterns. Text input is disabled - you can explore the sample data using the controls above, but cannot analyze new text until the backend becomes available.
+                    </p>
+                  </div>
+                )}
               </div>
-
-              {/* Threshold Control */}
-              <div className="p-3 border rounded bg-gray-50">
-                <label className="text-sm font-medium">Edge Weight Threshold</label>
-                <div className="flex items-center gap-3 mt-2">
-                  <input 
-                    type="range" 
-                    min="0" 
-                    max="1" 
-                    step="0.01" 
-                    value={threshold} 
-                    onChange={handleThresholdChange}
-                    className="flex-1" 
-                  />
-                  <span className="text-xs font-mono w-12 text-right bg-white px-2 py-1 rounded border">
-                    {threshold.toFixed(2)}
-                  </span>
-                </div>
-              </div>
-
-              {/* Text Input Section */}
-              {backendAvailable && (
-                <div className="p-3 border rounded bg-gray-50">
-                  <label className="text-sm font-medium">Input Text</label>
-                  <textarea
-                    className="w-full p-2 border rounded mt-2 text-sm bg-white disabled:bg-gray-100 disabled:cursor-not-allowed"
-                    rows={2}
-                    placeholder="Enter text to analyze attention patterns..."
-                    onChange={(e) => debouncedFetchAttentionData(e.target.value)}
-                    disabled={loading || !backendAvailable}
-                    defaultValue="When Mary and John went to the store, John gave a drink to"
-                  />
-                  {loading && (
-                    <div className="text-xs text-blue-500 mt-1.5">Loading attention patterns...</div>
-                  )}
-                  {error && (
-                    <div className="text-xs text-red-500 mt-1.5">{error}</div>
-                  )}
-                </div>
-              )}
-
-              {!backendAvailable && (
-                <div className="p-3 border rounded bg-yellow-50 text-xs">
-                  <p className="text-yellow-800">
-                    Backend is not available. Showing sample attention patterns.
-                  </p>
-                </div>
-              )}
-            </div>
-          )}
+            )}
+          </div>
         </div>
+
+        {/* Graph Section */}
+        {loading ? (
+          <div className="flex justify-center items-center h-[700px] border border-gray-100 rounded-lg bg-gray-50/80 shadow-[0_1px_2px_rgba(0,0,0,0.03)]">
+            <div className="text-sm">Loading...</div>
+          </div>
+        ) : (
+          <div className="border border-gray-100 rounded-lg bg-white overflow-hidden shadow-[0_1px_2px_rgba(0,0,0,0.03)]">
+            <svg ref={svgRef} width={graphDimensions.width} height={graphDimensions.height}></svg>
+          </div>
+        )}
       </div>
-
-      {/* Graph Section */}
-      {loading ? (
-        <div className="flex justify-center items-center h-[700px] border rounded bg-gray-50">
-          <div className="text-sm">Loading...</div>
-        </div>
-      ) : (
-        <div className="border rounded bg-white overflow-hidden">
-          <svg ref={svgRef} width={graphDimensions.width} height={graphDimensions.height}></svg>
-        </div>
-      )}
-    </div>
+    </>
   );
 };
 
