@@ -422,7 +422,7 @@ const AttentionFlowGraph = () => {
   }, [headGroups, groupColors, colorPalette]);
 
   // Function to get a random color that isn't already in use
-  const getRandomColor = (groupId: number) => {
+  const getRandomColor = () => {
     // Get all colors currently in use
     const usedColors = Object.values(groupColors);
     
@@ -441,7 +441,7 @@ const AttentionFlowGraph = () => {
 
   // Function to change a group's color
   const changeGroupColor = (groupId: number) => {
-    const newColor = getRandomColor(groupId);
+    const newColor = getRandomColor();
     setGroupColors(prev => ({
       ...prev,
       [groupId]: newColor
@@ -484,10 +484,7 @@ const AttentionFlowGraph = () => {
       }
     }
     
-    // Create color scales for groups and individual heads
-    const groupColorScale = d3.scaleOrdinal(d3.schemeTableau10)
-      .domain(headGroups.map(g => g.id.toString()));
-    
+    // Create color scales for individual heads
     const individualHeadColorScale = d3.scaleOrdinal(colorPalette)
       .domain(Array.from({length: data.numHeads}, (_, i) => i.toString()));
     
@@ -840,7 +837,10 @@ const AttentionFlowGraph = () => {
     headGroups,
     groupColors,
     getGroupColor,
-    getVisibleHeads, 
+    getVisibleHeads,
+    changeGroupColor,
+    colorPalette,
+    getHeadGroup,
     graphDimensions.height, 
     graphDimensions.width, 
     graphDimensions.padding
@@ -1109,7 +1109,7 @@ const AttentionFlowGraph = () => {
                       placeholder="Enter text to analyze attention patterns..."
                       onChange={(e) => debouncedFetchAttentionData(e.target.value)}
                       disabled={loading || !backendAvailable}
-                      defaultValue="When Mary and John went to the store, John gave a drink to"
+                      defaultValue={"When Mary and John went to the store, John gave a drink to"}
                     />
                     {loading && (
                       <div className="text-xs text-[#3B82F6] mt-2">Loading attention patterns...</div>
