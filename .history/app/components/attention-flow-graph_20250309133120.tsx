@@ -801,7 +801,7 @@ const AttentionFlowGraph = () => {
               {!backendAvailable && (
                 <div className="p-3 border rounded bg-yellow-50 text-xs">
                   <p className="text-yellow-800">
-                    Backend is not available. Showing sample attention patterns.
+                    Backend is not available. Showing sample attention patterns. Text input is disabled - you can explore the sample data using the controls above, but cannot analyze new text until the backend becomes available.
                   </p>
                 </div>
               )}
