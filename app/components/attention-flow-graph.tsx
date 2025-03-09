@@ -660,7 +660,7 @@ const AttentionFlowGraph = () => {
     <div className="flex flex-col gap-4 p-4 max-w-[1200px] mx-auto">
       <div className="flex justify-between items-start gap-4">
         <div className="flex-1">
-          <h2 className="text-lg font-medium mb-3">Attention Flow Graph</h2>
+          <h2 className="text-white text-2xl font-medium-bold mb-3">Attention Flow Graph</h2>
           
           {backendAvailable === null ? (
             <div className="text-blue-500 text-sm">Checking backend availability...</div>
