@@ -1,7 +1,7 @@
 /**
  * API Service for communicating with the backend
  */
-import { GraphData, HealthResponse, ModelsResponse, ProcessTextRequest } from './types';
+import { GraphData, HealthResponse, ProcessTextRequest } from './types';
 import { SUPPORTED_MODELS, SupportedModel } from '../config/models';
 
 // Get the API URL from environment or use default
@@ -95,9 +95,10 @@ export const processText = async (text: string, modelName: SupportedModel): Prom
   return await response.json();
 };
 
-// Export default object with all services
-export default {
+const apiService = {
   checkBackendHealth,
   getAvailableModels,
-  processText
-}; 
+  processText,
+};
+
+export default apiService; 

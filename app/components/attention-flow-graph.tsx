@@ -123,6 +123,37 @@ interface PredefinedGroup {
   description?: string;
 }
 
+// Color palette for individual heads
+const colorPalette = [
+  '#3B82F6', // blue-500
+  '#10B981', // emerald-500
+  '#F59E0B', // amber-500
+  '#EF4444', // red-500
+  '#8B5CF6', // violet-500
+  '#EC4899', // pink-500
+  '#14B8A6', // teal-500
+  '#F97316', // orange-500
+  '#6366F1', // indigo-500
+  '#D946EF', // fuchsia-500
+];
+
+// Generate a color for a group based on its ID
+const getGroupColor = (groupId: number): string => {
+  return colorPalette[groupId % colorPalette.length];
+};
+
+// Get default text for each model
+const getDefaultTextForModel = (model: string): string => {
+  switch (model) {
+    case 'gpt2-small':
+      return 'The cat sat on the mat.';
+    case 'pythia-2.8b':
+      return 'The quick brown fox jumps over the lazy dog.';
+    default:
+      return '';
+  }
+};
+
 const AttentionFlowGraph = () => {
   const [data, setData] = useState<GraphData>({
     numLayers: 4,
@@ -136,7 +167,7 @@ const AttentionFlowGraph = () => {
   const [loading, setLoading] = useState(false);
   const [headGroups, setHeadGroups] = useState<HeadGroup[]>([]);
   const [backendAvailable, setBackendAvailable] = useState<boolean | null>(null);
-  const svgRef = useRef(null);
+  const svgRef = useRef<SVGSVGElement | null>(null);
   const [headError, setHeadError] = useState<string | null>(null);
   const [textError, setTextError] = useState<string | null>(null);
   const [newGroupName, setNewGroupName] = useState<string>('');
@@ -151,17 +182,152 @@ const AttentionFlowGraph = () => {
   const [lastProcessedText, setLastProcessedText] = useState<string>("");
   const [lastProcessedModel, setLastProcessedModel] = useState<string>("");
   const [inputText, setInputText] = useState<string>("");
-  const [highlightedGroup, setHighlightedGroup] = useState<string | null>(null);
   
+  // Additional refs
+  const modelDropdownRef = useRef<HTMLDivElement>(null);
+  
+  // Event handlers
+  const handleModelChange = (model: string) => {
+    setCurrentModel(model);
+    setIsModelDropdownOpen(false);
+  };
+
+  const handleTextChange = (e: ChangeEvent<HTMLTextAreaElement>) => {
+    setInputText(e.target.value);
+  };
+
+  const handleThresholdChange = (e: ChangeEvent<HTMLInputElement>) => {
+    setThreshold(parseFloat(e.target.value));
+  };
+
+  const handleHeadSelection = (input: string) => {
+    const [layerStr, headStr] = input.split(',').map(s => s.trim());
+    
+    // Handle wildcards
+    if (layerStr === ':' && headStr === ':') {
+      // Add all heads
+      const newHeads: HeadPair[] = [];
+      for (let l = 0; l < data.numLayers; l++) {
+        for (let h = 0; h < data.numHeads; h++) {
+          newHeads.push({ layer: l, head: h });
+        }
+      }
+      setSelectedHeads(prev => [...prev, ...newHeads]);
+      return;
+    }
+    
+    if (layerStr === ':') {
+      // Add all heads for specified layer
+      const layer = parseInt(headStr);
+      if (isNaN(layer) || layer < 0 || layer >= data.numLayers) {
+        setHeadError(`Invalid layer: ${layer}`);
+        return;
+      }
+      const newHeads = Array.from({ length: data.numHeads }, (_, h) => ({ layer, head: h }));
+      setSelectedHeads(prev => [...prev, ...newHeads]);
+      return;
+    }
+    
+    if (headStr === ':') {
+      // Add all layers for specified head
+      const head = parseInt(layerStr);
+      if (isNaN(head) || head < 0 || head >= data.numHeads) {
+        setHeadError(`Invalid head: ${head}`);
+        return;
+      }
+      const newHeads = Array.from({ length: data.numLayers }, (_, l) => ({ layer: l, head }));
+      setSelectedHeads(prev => [...prev, ...newHeads]);
+      return;
+    }
+    
+    // Handle specific layer,head pair
+    const layer = parseInt(layerStr);
+    const head = parseInt(headStr);
+    
+    if (isNaN(layer) || isNaN(head) || 
+        layer < 0 || layer >= data.numLayers || 
+        head < 0 || head >= data.numHeads) {
+      setHeadError(`Invalid layer,head pair: ${layer},${head}`);
+      return;
+    }
+    
+    setSelectedHeads(prev => [...prev, { layer, head }]);
+    setHeadError(null);
+  };
+
+  const createNewGroup = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newGroupName.trim()) {
+      setGroupError('Group name cannot be empty');
+      return;
+    }
+    
+    if (headGroups.some(g => g.name === newGroupName.trim())) {
+      setGroupError('A group with this name already exists');
+      return;
+    }
+    
+    setHeadGroups(prev => [...prev, {
+      id: prev.length,
+      name: newGroupName.trim(),
+      heads: []
+    }]);
+    setNewGroupName('');
+    setGroupError(null);
+  };
+
+  const addHeadToGroup = (layer: number, head: number, groupId: number) => {
+    setHeadGroups(prev => prev.map(group => {
+      if (group.id === groupId) {
+        const headExists = group.heads.some(h => h.layer === layer && h.head === head);
+        if (headExists) {
+          return {
+            ...group,
+            heads: group.heads.filter(h => !(h.layer === layer && h.head === head))
+          };
+        }
+        return {
+          ...group,
+          heads: [...group.heads, { layer, head }]
+        };
+      }
+      return group;
+    }));
+  };
+
+  const removeHead = (layer: number, head: number, groupId?: number) => {
+    if (groupId !== undefined) {
+      // Remove from group
+      setHeadGroups(prev => prev.map(group => {
+        if (group.id === groupId) {
+          return {
+            ...group,
+            heads: group.heads.filter(h => !(h.layer === layer && h.head === head))
+          };
+        }
+        return group;
+      }));
+    } else {
+      // Remove from selected heads
+      setSelectedHeads(prev => prev.filter(h => !(h.layer === layer && h.head === head)));
+    }
+  };
+
+  const changeGroupColor = (groupId: number) => {
+    // This is a placeholder function - in a real implementation,
+    // you might want to cycle through different colors or show a color picker
+    console.log('Change color for group:', groupId);
+  };
+
   // Graph dimensions
   const graphDimensions = {
-    width: 1000,  // Increased width
-    height: 700,  // Increased height
+    width: 1000,
+    height: 700,
     padding: {
-      top: 40,
-      right: 180,  // Slightly reduced legend space
-      bottom: 60,
-      left: 60
+      top: 20,
+      right: 20,
+      bottom: 20,
+      left: 20
     }
   };
   
@@ -322,573 +488,7 @@ const AttentionFlowGraph = () => {
     }
   }, [currentModel, sampleAttentionDataMap, lastProcessedText, lastProcessedModel]);
 
-  // Create a ref to store the timeout ID
-  const timeoutIdRef = useRef<NodeJS.Timeout | null>(null);
-  
-  // Check backend availability and fetch models
-  useEffect(() => {
-    const checkBackend = async () => {
-      try {
-        // Check if the backend is available
-        await apiService.checkBackendHealth();
-        
-        // If it is, get the available models
-        const models = await apiService.getAvailableModels();
-        setAvailableModels(models.length > 0 ? models : ["gpt2-small", "pythia-2.8b"]);
-        setBackendAvailable(true);
-      } catch (error) {
-        console.error("Error checking backend:", error);
-        loadSampleData();
-      }
-    };
-    
-    // Helper function to load sample data when backend is unavailable
-    const loadSampleData = () => {
-      console.log("Loading sample data due to backend unavailability");
-      // Use sample data if backend is not available
-      if (Object.keys(sampleAttentionDataMap).length > 0) {
-        // Use the current model's data if available
-        if (sampleAttentionDataMap[currentModel]) {
-          setData(sampleAttentionDataMap[currentModel]);
-        } else {
-          // Otherwise use the first available model data
-          const firstModel = Object.keys(sampleAttentionDataMap)[0];
-          setData(sampleAttentionDataMap[firstModel]);
-          setCurrentModel(firstModel);
-        }
-        
-        // Ensure we have at least one head selected when in sample mode
-        if (selectedHeads.length === 0) {
-          setSelectedHeads([{ layer: 0, head: 0 }]);
-        }
-      }
-      setBackendAvailable(false);
-    };
-    
-    checkBackend();
-  }, [currentModel, sampleAttentionDataMap, selectedHeads.length]);
-
-  // Get default text based on model
-  const getDefaultTextForModel = useCallback((modelName: string): string => {
-    // Convert to lowercase for case-insensitive matching
-    const lowerCaseModel = modelName.toLowerCase();
-    
-    if (lowerCaseModel.includes('pythia')) {
-      return "Fact: The Colosseum is in the country of";
-    }
-    
-    // Default text for other models (e.g., GPT-2)
-    return "When Mary and John went to the store, John gave a drink to";
-  }, []);
-
-  // Update the text input field when model changes
-  useEffect(() => {
-    const defaultText = getDefaultTextForModel(currentModel);
-    setInputText(defaultText);
-  }, [currentModel, getDefaultTextForModel]);
-
-  // Remove the automatic text processing effect that watches for input changes
-  // This is the effect that we need to remove or modify
-  useEffect(() => {
-    console.log("Text processing effect triggered:", {
-      backendAvailable,
-      inputText,
-      lastProcessedText,
-      currentModel,
-      lastProcessedModel,
-      shouldProcess: backendAvailable && inputText && 
-          (inputText !== lastProcessedText || currentModel !== lastProcessedModel)
-    });
-    
-    // REMOVE this automatic processing logic that runs on every input change
-    // We'll keep just the initialization logic for when the component mounts
-    if (backendAvailable && inputText && inputText.trim().length > 0 && 
-        lastProcessedText === "" && lastProcessedModel === "") {
-      console.log("Processing initial text through effect:", inputText, currentModel);
-      fetchAttentionData(inputText);
-    }
-  }, [backendAvailable, inputText, currentModel, lastProcessedText, lastProcessedModel, fetchAttentionData]);
-
-  // Simplify the handleTextChange function - now it only updates the state
-  const handleTextChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    const text = e.target.value;
-    console.log("Text changed to:", text);
-    setInputText(text);
-    // No processing happens here - just update the state
-  };
-
-  // Handle model change
-  const handleModelChange = (newModel: string) => {
-    // If the model hasn't changed, do nothing
-    if (newModel === currentModel) {
-      setIsModelDropdownOpen(false);
-      return;
-    }
-    
-    setCurrentModel(newModel);
-    setIsModelDropdownOpen(false); // Close dropdown after selection
-    
-    // Reset selections when changing models
-    setSelectedHeads([]);
-    
-    // Get default layer and token counts based on the model
-    let defaultLayers = 4;
-    let defaultTokens = 5;
-    
-    // Set appropriate defaults based on model
-    if (newModel.toLowerCase().includes('gpt2')) {
-      defaultLayers = 12;  // GPT2 has 12 layers
-      defaultTokens = 5;
-    } else if (newModel.toLowerCase().includes('pythia')) {
-      defaultLayers = 32;  // Pythia-2.8b has 32 layers
-      defaultTokens = 5;
-    }
-    
-    // Reset SVG content to clear any existing visualization
-    if (svgRef.current) {
-      const svg = d3.select(svgRef.current);
-      svg.selectAll("*").remove();
-    }
-    
-    // Clear existing data when model changes with appropriate defaults for the model
-    setData({
-      numLayers: defaultLayers,
-      numTokens: defaultTokens,
-      numHeads: newModel.toLowerCase().includes('pythia') ? 32 : 12,  // Pythia has 32 heads, GPT2 has 12
-      attentionPatterns: [],
-      tokens: Array(defaultTokens).fill('token')
-    });
-    
-    // Set model-specific default text
-    const defaultText = getDefaultTextForModel(newModel);
-    setInputText(defaultText);
-    
-    // Add a notification that the user needs to click Process Text after changing the model
-    setTextError("Model changed. Click 'Process Text' to analyze with the new model.");
-  };
-
-  // Custom dropdown ref
-  const modelDropdownRef = useRef<HTMLDivElement>(null);
-  
-  // Handle clicks outside the model dropdown
-  useEffect(() => {
-    function handleClickOutside(event: MouseEvent) {
-      if (modelDropdownRef.current && !modelDropdownRef.current.contains(event.target as Element)) {
-        setIsModelDropdownOpen(false);
-      }
-    }
-    
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => {
-      document.removeEventListener('mousedown', handleClickOutside);
-    };
-  }, []);
-
-  // Initialize predefined head groups
-  useEffect(() => {
-    const initialGroups = predefinedGroups.map((group, index) => ({
-      id: index,
-      name: group.name,
-      heads: group.vertices.map(([layer, head]) => ({ layer, head })),
-      description: group.description
-    }));
-
-    setHeadGroups(initialGroups);
-  }, [predefinedGroups, currentModel]);
-
-  // Load model-specific sample data
-  useEffect(() => {
-    // Function to load sample data for a model
-    const loadSampleData = async (modelName: string) => {
-      try {
-        const response = await fetch(`/data/sample-attention-${modelName}.json`);
-        if (response.ok) {
-          const data = await response.json() as GraphData;
-          return data;
-        } else {
-          console.error(`Failed to load sample data for model ${modelName}`);
-          return null;
-        }
-      } catch (error) {
-        console.error(`Error loading sample data for model ${modelName}:`, error);
-        return null;
-      }
-    };
-
-    // Try to load sample data for all available models
-    const loadAllSampleData = async () => {
-      const dataMap: Record<string, GraphData> = {};
-      for (const model of availableModels) {
-        const modelData = await loadSampleData(model);
-        if (modelData) {
-          dataMap[model] = modelData;
-        }
-      }
-      setSampleAttentionDataMap(dataMap);
-      
-      // Initialize with current model's data if available
-      if (dataMap[currentModel]) {
-        setData(dataMap[currentModel]);
-      }
-    };
-    
-    loadAllSampleData();
-  }, [availableModels, currentModel]);
-  
-  // Update data when model changes
-  useEffect(() => {
-    if (sampleAttentionDataMap[currentModel]) {
-      setData(sampleAttentionDataMap[currentModel]);
-      
-      // If no heads are selected and we're in sample data mode,
-      // select a default head to allow interaction
-      if (selectedHeads.length === 0 && !backendAvailable) {
-        // Choose first head of the first layer as default
-        setSelectedHeads([{ layer: 0, head: 0 }]);
-      }
-    }
-  }, [currentModel, sampleAttentionDataMap, selectedHeads.length, backendAvailable]);
-
-  useEffect(() => {
-    const trackElement = document.querySelector('.custom-range-track') as HTMLDivElement;
-    if (trackElement) {
-      const percentage = threshold * 100;
-      trackElement.style.width = `${percentage}%`;
-    }
-  }, [threshold]);
-
-  // Update slider track position
-  const updateTrackPosition = (value: number) => {
-    const trackElement = document.querySelector('.custom-range-track') as HTMLDivElement;
-    if (trackElement) {
-      const percentage = value * 100;
-      trackElement.style.width = `${percentage}%`;
-    }
-  };
-
-  // Handle threshold change
-  const handleThresholdChange = (e: ChangeEvent<HTMLInputElement>) => {
-    const value = parseFloat(e.target.value);
-    setThreshold(value);
-    
-    // Update track width
-    updateTrackPosition(value);
-  };
-
-  const handleHeadSelection = (input: string) => {
-    try {
-      const line = input.trim().split('\n')[0];
-      if (!line) return;
-
-      // Check for the ":,:" pattern to add all heads for all layers
-      if (line.match(/^:\s*,\s*:$/)) {
-        // We have a :,: pattern for all heads in all layers
-        const headsToAdd: HeadPair[] = [];
-        
-        for (let layer = 0; layer < data.numLayers; layer++) {
-          for (let head = 0; head < data.numHeads; head++) {
-            // Skip if already selected or part of a group
-            if (selectedHeads.some(h => h.layer === layer && h.head === head) ||
-                headGroups.some(g => g.heads.some(h => h.layer === layer && h.head === head))) {
-              continue;
-            }
-            
-            headsToAdd.push({ layer, head });
-          }
-        }
-        
-        if (headsToAdd.length === 0) {
-          setHeadError("All heads are already selected or in groups");
-          return;
-        }
-        
-        setSelectedHeads(prev => [...prev, ...headsToAdd]);
-        setHeadError(null);
-        return;
-      }
-
-      // Check for the "layer,:" pattern to add all heads for a layer
-      const allHeadsPattern = /^(\d+)\s*,\s*:$/;
-      const matchAllHeads = line.match(allHeadsPattern);
-      
-      if (matchAllHeads) {
-        // We have a layer,: pattern
-        const layer = parseInt(matchAllHeads[1]);
-        
-        // Validate layer number
-        if (layer < 0 || layer >= data.numLayers) {
-          setHeadError(`Layer must be 0-${data.numLayers - 1}`);
-          return;
-        }
-        
-        // Add all heads for this layer
-        const headsToAdd: HeadPair[] = [];
-        
-        for (let head = 0; head < data.numHeads; head++) {
-          // Skip if already selected or part of a group
-          if (selectedHeads.some(h => h.layer === layer && h.head === head) ||
-              headGroups.some(g => g.heads.some(h => h.layer === layer && h.head === head))) {
-            continue;
-          }
-          
-          headsToAdd.push({ layer, head });
-        }
-        
-        if (headsToAdd.length === 0) {
-          setHeadError("All heads in this layer are already selected or in groups");
-          return;
-        }
-        
-        setSelectedHeads(prev => [...prev, ...headsToAdd]);
-        setHeadError(null);
-        return;
-      }
-      
-      // Check for the ":,head" pattern to add all layers for a head
-      const allLayersPattern = /^:\s*,\s*(\d+)$/;
-      const matchAllLayers = line.match(allLayersPattern);
-      
-      if (matchAllLayers) {
-        // We have a :,head pattern
-        const head = parseInt(matchAllLayers[1]);
-        
-        // Validate head number
-        if (head < 0 || head >= data.numHeads) {
-          setHeadError(`Head must be 0-${data.numHeads - 1}`);
-          return;
-        }
-        
-        // Add all layers for this head
-        const headsToAdd: HeadPair[] = [];
-        
-        for (let layer = 0; layer < data.numLayers; layer++) {
-          // Skip if already selected or part of a group
-          if (selectedHeads.some(h => h.layer === layer && h.head === head) ||
-              headGroups.some(g => g.heads.some(h => h.layer === layer && h.head === head))) {
-            continue;
-          }
-          
-          headsToAdd.push({ layer, head });
-        }
-        
-        if (headsToAdd.length === 0) {
-          setHeadError("All layers for this head are already selected or in groups");
-          return;
-        }
-        
-        setSelectedHeads(prev => [...prev, ...headsToAdd]);
-        setHeadError(null);
-        return;
-      }
-      
-      // Original logic for single head selection
-      const parts = line.split(',');
-      if (parts.length !== 2) {
-        setHeadError("Invalid format. Please use 'layer,head' (e.g., '0,1'), 'layer,:' for all heads in a layer, ':,head' for all layers of a head, or ':,:' for all heads");
-        return;
-      }
-
-      const [layer, head] = parts.map(num => parseInt(num.trim()));
-      if (isNaN(layer) || isNaN(head)) {
-        setHeadError("Layer and head must be numbers");
-        return;
-      }
-
-      if (layer < 0 || head < 0 || layer >= data.numLayers || head >= data.numHeads) {
-        setHeadError(`Layer must be 0-${data.numLayers - 1} and head must be 0-${data.numHeads - 1}`);
-        return;
-      }
-
-      if (getHeadGroup(layer, head) === null && 
-          !selectedHeads.some(h => h.layer === layer && h.head === head)) {
-        setSelectedHeads(prev => [...prev, { layer, head }]);
-        setHeadError(null);
-      } else if (getHeadGroup(layer, head) !== null) {
-        setHeadError("This head is already part of a group");
-      } else {
-        setHeadError("This head is already selected");
-      }
-    } catch {
-      setHeadError("Invalid input format");
-    }
-  };
-
-  const addHeadToGroup = (layer: number, head: number, groupId: number) => {
-    setHeadGroups(prev => {
-      // Find the target group
-      const targetGroup = prev.find(g => g.id === groupId);
-      if (!targetGroup) return prev;
-
-      // Toggle the head in this group
-      const isInGroup = targetGroup.heads.some(h => h.layer === layer && h.head === head);
-      
-      return prev.map(group =>
-        group.id === groupId
-          ? {
-              ...group,
-              heads: isInGroup
-                ? group.heads.filter(h => !(h.layer === layer && h.head === head))
-                : [...group.heads, { layer, head }]
-            }
-          : group
-      );
-    });
-  };
-
-  const removeHead = (layer: number, head: number, groupId?: number) => {
-    if (groupId !== undefined) {
-      // Remove from a specific group
-      setHeadGroups(prev => prev.map(group => {
-        if (group.id === groupId) {
-          return {
-            ...group,
-            heads: group.heads.filter(h => !(h.layer === layer && h.head === head))
-          };
-        }
-        return group;
-      }));
-    } else {
-      // Remove from selected heads
-      setSelectedHeads(prev => prev.filter(h => !(h.layer === layer && h.head === head)));
-    }
-  };
-
-  // Add function to create a new head group
-  const createNewGroup = (e: React.FormEvent) => {
-    e.preventDefault();
-    
-    // Validate group name
-    if (!newGroupName.trim()) {
-      setGroupError("Group name is required");
-      return;
-    }
-    
-    // Check for duplicate names
-    if (headGroups.some(g => g.name.toLowerCase() === newGroupName.trim().toLowerCase())) {
-      setGroupError("A group with this name already exists");
-      return;
-    }
-    
-    // Create new group
-    const newGroup: HeadGroup = {
-      id: headGroups.length > 0 ? Math.max(...headGroups.map(g => g.id)) + 1 : 0,
-      name: newGroupName.trim(),
-      heads: [],
-    };
-    
-    // Add new group at the beginning of the array so it appears at the top
-    setHeadGroups(prev => [newGroup, ...prev]);
-    setNewGroupName('');
-    setGroupError(null);
-  };
-
-  // Array of vibrant colors (our preferred palette)
-  const colorPalette = useMemo(() => [
-    "#38B2AC", // Teal
-    "#9F7AEA", // Purple
-    "#F6AD55", // Orange
-    "#68D391", // Green
-    "#F687B3", // Pink
-    "#4FD1C5", // Teal-400
-    "#B794F4", // Purple-300
-    "#7F9CF5", // Indigo-400
-    "#C6F6D5", // Green-200
-    "#FBD38D", // Orange-300
-    "#76E4F7", // Cyan-300
-    "#E9D8FD", // Purple-200
-    "#90CDF4", // Blue-300
-    "#FEB2B2", // Red-300
-    "#81E6D9", // Teal-300
-    "#D6BCFA", // Purple-300
-    "#FBB6CE", // Pink-300
-    "#B2F5EA", // Teal-200
-    "#667EEA", // Indigo-600
-    "#ED64A6", // Pink-500
-    "#48BB78", // Green-500
-    "#ECC94B", // Yellow-400
-    "#4299E1", // Blue-500
-    "#ED8936", // Orange-500
-    "#9F7AEA", // Purple-500
-    "#F56565", // Red-500
-    "#38A169", // Green-600
-    "#D69E2E", // Yellow-500
-    "#3182CE", // Blue-600
-    "#DD6B20", // Orange-600
-    "#805AD5", // Purple-600
-    "#E53E3E", // Red-600
-    "#2F855A", // Green-700
-    "#B7791F", // Yellow-600
-    "#2B6CB0", // Blue-700
-    "#C05621", // Orange-700
-    "#6B46C1", // Purple-700
-    "#C53030", // Red-700
-    "#276749", // Green-800
-    "#744210", // Yellow-700
-    "#2C5282", // Blue-800
-    "#9C4221", // Orange-800
-    "#553C9A", // Purple-800
-    "#9B2C2C", // Red-800
-    "#22543D", // Green-900
-    "#5F370E", // Yellow-800
-    "#2A4365", // Blue-900
-    "#7B341E", // Orange-900
-    "#44337A", // Purple-900
-    "#822727"  // Red-900
-  ], []);
-
-  // Add array to store custom colors for groups
-  const [groupColors, setGroupColors] = useState<Record<number, string>>({});
-  
-  // Initialize group colors with our preferred palette when headGroups changes
-  useEffect(() => {
-    // Only assign initial colors if we haven't assigned any yet
-    if (Object.keys(groupColors).length === 0 && headGroups.length > 0) {
-      const initialColors: Record<number, string> = {};
-      
-      headGroups.forEach((group, index) => {
-        initialColors[group.id] = colorPalette[index % colorPalette.length];
-      });
-      
-      setGroupColors(initialColors);
-    }
-  }, [headGroups, groupColors, colorPalette]);
-
-  // Function to get a random color that isn't already in use
-  const getRandomColor = useCallback(() => {
-    // Get all colors currently in use
-    const usedColors = Object.values(groupColors);
-    
-    // Filter out colors that are already in use
-    const availableOptions = colorPalette.filter(color => !usedColors.includes(color));
-    
-    // If no available colors, use a random one from our palette
-    if (availableOptions.length === 0) {
-      return colorPalette[Math.floor(Math.random() * colorPalette.length)];
-    }
-    
-    // Pick a random color from the available options
-    const randomIndex = Math.floor(Math.random() * availableOptions.length);
-    return availableOptions[randomIndex];
-  }, [groupColors, colorPalette]);
-
-  // Function to change a group's color
-  const changeGroupColor = useCallback((groupId: number) => {
-    const newColor = getRandomColor();
-    setGroupColors(prev => ({
-      ...prev,
-      [groupId]: newColor
-    }));
-  }, [getRandomColor]);
-
-  // Function to get color for a group, using custom color if available
-  const getGroupColor = useCallback((groupId: number) => {
-    if (groupColors[groupId]) {
-      return groupColors[groupId];
-    }
-    return colorPalette[groupId % colorPalette.length];
-  }, [groupColors, colorPalette]);
-
-  // Add a utility for debounced redrawing
+  // Create a debounced version of the drawGraph function
   const useDebounce = (fn: () => void, delay: number) => {
     const timeoutRef = useRef<NodeJS.Timeout | null>(null);
     
@@ -911,14 +511,6 @@ const AttentionFlowGraph = () => {
       }, delay);
     };
   };
-
-  // Add color scale for groups
-  const groupColorScale = useMemo(() => {
-    const groups = [...predefinedGroups, ...headGroups];
-    return d3.scaleOrdinal<string>()
-      .domain(groups.map(g => g.name))
-      .range(d3.schemeCategory10);
-  }, [predefinedGroups, headGroups]);
 
   // Memoize drawGraph to prevent infinite loops
   const drawGraph = React.useCallback(() => {
@@ -1044,7 +636,7 @@ const AttentionFlowGraph = () => {
     };
     
     // Add links in a batch for better performance
-    const linkElements = linkContainer.selectAll("path")
+    linkContainer.selectAll("path")
       .data(links)
       .enter()
       .append("path")
@@ -1055,115 +647,12 @@ const AttentionFlowGraph = () => {
       .attr("stroke-width", 4)
       .attr("opacity", 0.6)
       .attr("data-source", d => d.source)
-      .attr("data-target", d => d.target)
-      .style("cursor", "pointer")
-      .on("mouseover", function(this: SVGPathElement, d: Link) {
-        // Highlight the hovered link
-        d3.select(this)
-          .attr("opacity", 1)
-          .attr("stroke-width", 6);
-
-        // If the link belongs to a group, highlight all links in that group
-        if (d.groupId !== -1) {
-          linkContainer.selectAll("path")
-            .filter(function(l) {
-              return (l as Link).groupId === d.groupId;
-            })
-            .attr("opacity", 0.8)
-            .attr("stroke-width", 5);
-
-          // Also highlight the nodes connected to this group's links
-          const groupLinks = links.filter((l: Link) => l.groupId === d.groupId);
-          const groupNodeIds = new Set([
-            ...groupLinks.map((l: Link) => l.source),
-            ...groupLinks.map((l: Link) => l.target)
-          ]);
-
-          nodeContainer.selectAll("circle")
-            .filter(function(n) {
-              return groupNodeIds.has((n as Node).id);
-            })
-            .attr("fill", "#d1d5db")
-            .attr("r", 8);
-
-          // Highlight the corresponding group in the legend
-          legendContainer.selectAll(".legend-item")
-            .filter(function() {
-              const text = d3.select(this).select("text").text();
-              const group = headGroups.find(g => g.id === d.groupId);
-              return group ? text === group.name : false;
-            })
-            .select("text")
-            .attr("font-weight", "bold")
-            .attr("fill", "#3B82F6");
-        } else {
-          // For individual heads, highlight the corresponding head in the legend
-          legendContainer.selectAll(".legend-item")
-            .filter(function() {
-              const text = d3.select(this).select("text").text();
-              return text === `L${d.source.split('-')[0]}, H${d.head}`;
-            })
-            .select("text")
-            .attr("font-weight", "bold")
-            .attr("fill", "#3B82F6");
-        }
-      })
-      .on("mouseout", function(this: SVGPathElement, d: Link) {
-        // Reset the hovered link
-        d3.select(this)
-          .attr("opacity", 0.6)
-          .attr("stroke-width", 4);
-
-        // If the link belonged to a group, reset all links in that group
-        if (d.groupId !== -1) {
-          linkContainer.selectAll("path")
-            .filter(function(l) {
-              return (l as Link).groupId === d.groupId;
-            })
-            .attr("opacity", 0.6)
-            .attr("stroke-width", 4);
-
-          // Reset the nodes
-          const groupLinks = links.filter((l: Link) => l.groupId === d.groupId);
-          const groupNodeIds = new Set([
-            ...groupLinks.map((l: Link) => l.source),
-            ...groupLinks.map((l: Link) => l.target)
-          ]);
-
-          nodeContainer.selectAll("circle")
-            .filter(function(n) {
-              return groupNodeIds.has((n as Node).id);
-            })
-            .attr("fill", "#e5e7eb")
-            .attr("r", 6);
-
-          // Reset the corresponding group in the legend
-          legendContainer.selectAll(".legend-item")
-            .filter(function() {
-              const text = d3.select(this).select("text").text();
-              const group = headGroups.find(g => g.id === d.groupId);
-              return group ? text === group.name : false;
-            })
-            .select("text")
-            .attr("font-weight", "normal")
-            .attr("fill", "currentColor");
-        } else {
-          // Reset the corresponding head in the legend
-          legendContainer.selectAll(".legend-item")
-            .filter(function() {
-              const text = d3.select(this).select("text").text();
-              return text === `L${d.source.split('-')[0]}, H${d.head}`;
-            })
-            .select("text")
-            .attr("font-weight", "normal")
-            .attr("fill", "currentColor");
-        }
-      });
+      .attr("data-target", d => d.target);
 
     // Add nodes in a batch
     const nodeContainer = g.append("g").attr("class", "nodes");
     
-    const nodeElements = nodeContainer.selectAll("circle")
+    nodeContainer.selectAll("circle")
       .data(nodes)
       .enter()
       .append("circle")
@@ -1172,18 +661,7 @@ const AttentionFlowGraph = () => {
       .attr("cy", d => d.y)
       .attr("r", 6)
       .attr("fill", "#e5e7eb")
-      .attr("data-node-id", d => d.id)
-      .style("cursor", "pointer")
-      .on("mouseover", function() {
-        d3.select(this)
-          .attr("r", 8)
-          .attr("fill", "#d1d5db");
-      })
-      .on("mouseout", function() {
-        d3.select(this)
-          .attr("r", 6)
-          .attr("fill", "#e5e7eb");
-      });
+      .attr("data-node-id", d => d.id);
 
     // Add legend
     const legendContainer = g.append("g")
@@ -1235,63 +713,7 @@ const AttentionFlowGraph = () => {
           .attr("x", 40)
           .attr("y", legendY + 4)
           .attr("font-size", "12px")
-          .text(group.name)
-          .on("mouseover", function() {
-            // Highlight all links in this group
-            linkContainer.selectAll("path")
-              .filter(function(l) {
-                return (l as Link).groupId === group.id;
-              })
-              .attr("opacity", 0.8)
-              .attr("stroke-width", 5);
-
-            // Highlight connected nodes
-            const groupLinks = links.filter((l: Link) => l.groupId === group.id);
-            const groupNodeIds = new Set([
-              ...groupLinks.map((l: Link) => l.source),
-              ...groupLinks.map((l: Link) => l.target)
-            ]);
-
-            nodeContainer.selectAll("circle")
-              .filter(function(n) {
-                return groupNodeIds.has((n as Node).id);
-              })
-              .attr("fill", "#d1d5db")
-              .attr("r", 8);
-
-            // Highlight the legend text
-            d3.select(this)
-              .attr("font-weight", "bold")
-              .attr("fill", "#3B82F6");
-          })
-          .on("mouseout", function() {
-            // Reset all links in this group
-            linkContainer.selectAll("path")
-              .filter(function(l) {
-                return (l as Link).groupId === group.id;
-              })
-              .attr("opacity", 0.6)
-              .attr("stroke-width", 4);
-
-            // Reset connected nodes
-            const groupLinks = links.filter((l: Link) => l.groupId === group.id);
-            const groupNodeIds = new Set([
-              ...groupLinks.map((l: Link) => l.source),
-              ...groupLinks.map((l: Link) => l.target)
-            ]);
-
-            nodeContainer.selectAll("circle")
-              .filter(function(n) {
-                return groupNodeIds.has((n as Node).id);
-              })
-              .attr("fill", "#e5e7eb")
-              .attr("r", 6);
-
-            // Reset the legend text
-            d3.select(this)
-              .attr("font-weight", "normal")
-              .attr("fill", "currentColor");
-          });
+          .text(group.name);
         
         legendY += 20;
       });
@@ -1336,65 +758,7 @@ const AttentionFlowGraph = () => {
           .attr("x", 40)
           .attr("y", legendY + 4)
           .attr("font-size", "12px")
-          .text(`L${head.layer}, H${head.head}`)
-          .on("mouseover", function() {
-            // Highlight all links for this head
-            linkContainer.selectAll("path")
-              .filter(function(l) {
-                return (l as Link).head === head.head && (l as Link).groupId === -1;
-              })
-              .attr("opacity", 0.8)
-              .attr("stroke-width", 5);
-
-            // Highlight connected nodes
-            const headLinks = links.filter((l: Link) => l.head === head.head && l.groupId === -1);
-            const headNodeIds = new Set([
-              ...headLinks.map((l: Link) => l.source),
-              ...headLinks.map((l: Link) => l.target)
-            ]);
-
-            nodeContainer.selectAll("circle")
-              .filter(function(n) {
-                return headNodeIds.has((n as Node).id);
-              })
-              .attr("fill", "#d1d5db")
-              .attr("r", 8);
-
-            // Highlight the legend text
-            d3.select(this)
-              .attr("font-weight", "bold")
-              .attr("fill", "#3B82F6");
-          })
-          .on("mouseout", function() {
-            // Reset all links for this head
-            linkContainer.selectAll("path")
-              .filter(function(l) {
-                return (l as Link).head === head.head && (l as Link).groupId === -1;
-              })
-              .attr("opacity", 0.6)
-              .attr("stroke-width", 4);
-
-            // Reset connected nodes
-            const headLinks = links.filter((l: Link) => l.head === head.head && l.groupId === -1);
-            const headNodeIds = new Set([
-              ...headLinks.map((l: Link) => l.source),
-              ...headLinks.map((l: Link) => l.target)
-            ]);
-
-            nodeContainer.selectAll("circle")
-              .filter(function(n) {
-                return headNodeIds.has((n as Node).id);
-              })
-              .attr("fill", "#e5e7eb")
-              .attr("r", 6);
-
-            // Reset the legend text
-            d3.select(this)
-              .attr("font-weight", "normal")
-              .attr("fill", "currentColor");
-          });
-        
-        legendY += 20;
+          .text(`L${head.layer}, H${head.head}`);
       });
     }
   }, [
@@ -1808,6 +1172,9 @@ const AttentionFlowGraph = () => {
             <svg ref={svgRef} width={graphDimensions.width} height={graphDimensions.height}></svg>
           </div>
         )}
+      </div>
+      <div className="text-xs text-gray-600 mt-2">
+        Don&apos;t forget to check the backend health!
       </div>
     </>
   );
