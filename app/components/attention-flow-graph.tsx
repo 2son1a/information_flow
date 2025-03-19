@@ -166,7 +166,7 @@ const AttentionFlowGraph = () => {
   const [selectedHeads, setSelectedHeads] = useState<HeadPair[]>([]);
   const [loading, setLoading] = useState(false);
   const [headGroups, setHeadGroups] = useState<HeadGroup[]>([]);
-  const [backendAvailable, setBackendAvailable] = useState<boolean | null>(null);
+  const [backendAvailable] = useState<boolean | null>(null);
   const svgRef = useRef<SVGSVGElement | null>(null);
   const [headError, setHeadError] = useState<string | null>(null);
   const [textError, setTextError] = useState<string | null>(null);
@@ -176,8 +176,8 @@ const AttentionFlowGraph = () => {
   const dropdownRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [currentModel, setCurrentModel] = useState<string>("gpt2-small");
-  const [availableModels, setAvailableModels] = useState<string[]>(["gpt2-small", "pythia-2.8b"]);
-  const [sampleAttentionDataMap, setSampleAttentionDataMap] = useState<Record<string, GraphData>>({});
+  const [availableModels] = useState<string[]>(["gpt2-small", "pythia-2.8b"]);
+  const [sampleAttentionDataMap] = useState<Record<string, GraphData>>({});
   const [isModelDropdownOpen, setIsModelDropdownOpen] = useState(false);
   const [lastProcessedText, setLastProcessedText] = useState<string>("");
   const [lastProcessedModel, setLastProcessedModel] = useState<string>("");
@@ -688,7 +688,7 @@ const AttentionFlowGraph = () => {
       
       legendY += 20;
       
-      headGroups.forEach((group, i) => {
+      headGroups.forEach(group => {
         // Skip empty groups
         if (group.heads.length === 0) return;
         
@@ -709,7 +709,7 @@ const AttentionFlowGraph = () => {
           .attr("opacity", 0.8);
         
         // Text
-        const textElement = legendItem.append("text")
+        legendItem.append("text")
           .attr("x", 40)
           .attr("y", legendY + 4)
           .attr("font-size", "12px")
@@ -766,10 +766,7 @@ const AttentionFlowGraph = () => {
     threshold, 
     selectedHeads, 
     headGroups,
-    getGroupColor,
     getVisibleHeads,
-    changeGroupColor,
-    colorPalette,
     getHeadGroup,
     graphDimensions.height, 
     graphDimensions.width, 
@@ -824,7 +821,7 @@ const AttentionFlowGraph = () => {
         fetchAttentionData(defaultText);
       }, 100);
     }
-  }, [backendAvailable, currentModel, getDefaultTextForModel, lastProcessedText, fetchAttentionData]);
+  }, [backendAvailable, currentModel, lastProcessedText, fetchAttentionData]);
 
   return (
     <>
@@ -882,7 +879,7 @@ const AttentionFlowGraph = () => {
                   </div>
                   <div className="mt-2 p-2 bg-blue-50 rounded text-xs text-blue-800">
                     <p className="font-medium">Model Loading:</p>
-                    <p>When you select a model that isn't currently loaded, the backend will attempt to load it. Please be patient as this may take some time, especially for larger models like Pythia.</p>
+                    <p>When you select a model that isn&apos;t currently loaded, the backend will attempt to load it. Please be patient as this may take some time, especially for larger models like Pythia.</p>
                     {loading && currentModel !== lastProcessedModel && <p className="mt-1 font-medium text-blue-600">Loading model data... Please wait.</p>}
                   </div>
                 </div>
