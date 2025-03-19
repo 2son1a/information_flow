@@ -1,6 +1,6 @@
 {
   "env": {
-    "NEXT_PUBLIC_API_URL": "http://ssh8.vast.ai:18550"
+    "NEXT_PUBLIC_API_URL": "http://129.213.86.181:8080"
   },
   "headers": [
     {
