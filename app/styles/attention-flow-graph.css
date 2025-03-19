@@ -1,0 +1,55 @@
+/* Slider styles */
+.custom-range {
+  @apply appearance-none bg-transparent w-full h-6 cursor-pointer;
+}
+
+.custom-range::-webkit-slider-runnable-track {
+  @apply h-[6px] rounded-full bg-gradient-to-r from-gray-200 to-gray-300;
+}
+
+.custom-range::-webkit-slider-thumb {
+  @apply appearance-none h-4 w-4 rounded-full bg-white border border-[#3B82F6] shadow-md -mt-[4px];
+  background: linear-gradient(to bottom, #ffffff, #f5f7fa);
+}
+
+.custom-range::-moz-range-track {
+  @apply h-[6px] rounded-full bg-gradient-to-r from-gray-200 to-gray-300;
+}
+
+.custom-range::-moz-range-thumb {
+  @apply h-4 w-4 rounded-full bg-white border border-[#3B82F6] shadow-md;
+  background: linear-gradient(to bottom, #ffffff, #f5f7fa);
+}
+
+.custom-range:focus {
+  @apply outline-none;
+}
+
+.custom-range:focus::-webkit-slider-thumb {
+  @apply border-[#3B82F6] shadow-lg;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+}
+
+.custom-range:focus::-moz-range-thumb {
+  @apply border-[#3B82F6] shadow-lg;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+}
+
+/* Range track wrapper */
+.custom-range-wrapper {
+  @apply relative w-full;
+}
+
+.custom-range-track {
+  @apply absolute pointer-events-none h-[6px] bg-gradient-to-r from-[#3B82F6] to-[#60A5FA] rounded-full;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 0;
+}
+
+/* SVG optimization */
+.svg-container {
+  will-change: transform;
+  contain: content;
+  transform: translateZ(0);
+} 

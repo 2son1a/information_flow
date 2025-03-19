@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useRef, ChangeEvent, useCallback, useMemo } from 'react';
 import * as d3 from 'd3';
+import apiService from '../api/service';
 
 // Styles for custom range slider
 const sliderStyles = `
@@ -51,6 +52,15 @@ const sliderStyles = `
     top: 50%;
     transform: translateY(-50%);
     z-index: 0;
+  }
+`;
+
+// Add a new CSS style for smooth SVG rendering
+const svgOptimizationStyles = `
+  .svg-container {
+    will-change: transform;
+    contain: content;
+    transform: translateZ(0);
   }
 `;
 
@@ -137,6 +147,11 @@ const AttentionFlowGraph = () => {
   const [currentModel, setCurrentModel] = useState<string>("gpt2-small");
   const [availableModels, setAvailableModels] = useState<string[]>(["gpt2-small", "pythia-2.8b"]);
   const [sampleAttentionDataMap, setSampleAttentionDataMap] = useState<Record<string, GraphData>>({});
+  const [isModelDropdownOpen, setIsModelDropdownOpen] = useState(false);
+  const [lastProcessedText, setLastProcessedText] = useState<string>("");
+  const [lastProcessedModel, setLastProcessedModel] = useState<string>("");
+  const [inputText, setInputText] = useState<string>("");
+  const [highlightedGroup, setHighlightedGroup] = useState<string | null>(null);
   
   // Graph dimensions
   const graphDimensions = {
@@ -249,96 +264,78 @@ const AttentionFlowGraph = () => {
   }, [headGroups, selectedHeads]);
 
   const fetchAttentionData = useCallback(async (text: string) => {
+    // Skip if we've already processed this text with this model
+    // Add extra log to help with debugging
+    if (text === lastProcessedText && currentModel === lastProcessedModel) {
+      console.log("Skipping data fetch - text and model unchanged", {
+        text,
+        lastProcessedText,
+        currentModel, 
+        lastProcessedModel,
+        areEqual: text === lastProcessedText && currentModel === lastProcessedModel
+      });
+      return;
+    }
+    
+    console.log("Fetching attention data for text:", text, "with model:", currentModel);
+    
     try {
       setTextError(null);
       setLoading(true);
       
-      // Get the API URL from environment or use default
-      let apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://0.0.0.0:8000';
-      
-      // If the API URL is using http and we're on https (like Vercel), try to use https for the API as well
-      if (typeof window !== 'undefined' && window.location.protocol === 'https:' && apiUrl.startsWith('http:')) {
-        const httpsUrl = apiUrl.replace('http:', 'https:');
-        console.log(`Trying HTTPS API URL: ${httpsUrl} (original: ${apiUrl})`);
-        apiUrl = httpsUrl;
+      try {
+        console.log("Making API request to process text");
+        const result = await apiService.processText(text, currentModel);
+        console.log("API request successful, updating data", result);
+        
+        // Update data first
+        setData(result);
+        
+        // Then update the tracking variables - do this after data update
+        // to ensure we don't skip processing on state change
+        setLastProcessedText(text);
+        setLastProcessedModel(currentModel);
+      } catch (error) {
+        console.error('Error fetching attention data:', error);
+        
+        // Check for specific error messages that might indicate model loading issues
+        const errorMessage = error instanceof Error ? error.message : 'Failed to fetch attention data';
+        
+        if (errorMessage.includes('not loaded') || errorMessage.includes('not found') || errorMessage.includes('404')) {
+          setTextError(`Model "${currentModel}" is not currently loaded on the backend. When you select a different model, the backend will try to load it. This may take some time for large models like Pythia.`);
+        } else {
+          setTextError(errorMessage);
+        }
+        
+        // If backend fails, load sample data if available
+        if (sampleAttentionDataMap[currentModel]) {
+          console.log("Loading sample data due to API error");
+          setData(sampleAttentionDataMap[currentModel]);
+          // Update last processed info even when using sample data
+          setLastProcessedText(text);
+          setLastProcessedModel(currentModel);
+        }
       }
-      
-      console.log(`Fetching attention data from: ${apiUrl}/process`);
-      
-      const response = await fetch(`${apiUrl}/process`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          text,
-          model_name: currentModel
-        }),
-        // Ensure credentials are included for CORS
-        credentials: 'include'
-      });
-      
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error(`Error from API: ${response.status} - ${errorText}`);
-        throw new Error(`Error ${response.status}: ${errorText || 'Failed to fetch attention data'}`);
-      }
-      
-      const result = await response.json();
-      setData(result);
-    } catch (error) {
-      console.error('Error fetching attention data:', error);
-      setTextError(error instanceof Error ? error.message : 'Failed to fetch attention data');
     } finally {
       setLoading(false);
+      console.log("Fetch operation completed, text processing finished");
     }
-  }, [currentModel]);
+  }, [currentModel, sampleAttentionDataMap, lastProcessedText, lastProcessedModel]);
 
   // Create a ref to store the timeout ID
   const timeoutIdRef = useRef<NodeJS.Timeout | null>(null);
   
-  // Create a debounced version of fetchAttentionData
-  const debouncedFetchAttentionData = useCallback((text: string) => {
-    if (timeoutIdRef.current) {
-      clearTimeout(timeoutIdRef.current);
-    }
-    
-    timeoutIdRef.current = setTimeout(() => {
-      if (text.trim().length > 0) {
-        fetchAttentionData(text);
-      }
-      timeoutIdRef.current = null;
-    }, 1000);
-  }, [fetchAttentionData]);
-
   // Check backend availability and fetch models
   useEffect(() => {
     const checkBackend = async () => {
       try {
-        // Get the API URL from environment or use default
-        let apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://0.0.0.0:8000';
+        // Check if the backend is available
+        await apiService.checkBackendHealth();
         
-        // If the API URL is using http and we're on https (like Vercel), try to use https for the API as well
-        if (typeof window !== 'undefined' && window.location.protocol === 'https:' && apiUrl.startsWith('http:')) {
-          const httpsUrl = apiUrl.replace('http:', 'https:');
-          console.log(`Trying HTTPS API URL for backend check: ${httpsUrl} (original: ${apiUrl})`);
-          apiUrl = httpsUrl;
-        }
-        
-        console.log(`Checking backend at: ${apiUrl}/models`);
-        
-        const response = await fetch(`${apiUrl}/models`, {
-          credentials: 'include' // Include credentials for CORS
-        });
-        
-        if (response.ok) {
-          const data = await response.json();
-          setAvailableModels(data.models || ["gpt2-small", "pythia-2.8b"]);
-          setBackendAvailable(true);
-        } else {
-          console.warn(`Backend health check failed with status: ${response.status}`, await response.text());
-          loadSampleData();
-        }
+        // If it is, get the available models
+        const models = await apiService.getAvailableModels();
+        setAvailableModels(models.length > 0 ? models : ["gpt2-small", "pythia-2.8b"]);
+        setBackendAvailable(true);
       } catch (error) {
         console.error("Error checking backend:", error);
         loadSampleData();
@@ -384,10 +381,52 @@ const AttentionFlowGraph = () => {
     return "When Mary and John went to the store, John gave a drink to";
   }, []);
 
+  // Update the text input field when model changes
+  useEffect(() => {
+    const defaultText = getDefaultTextForModel(currentModel);
+    setInputText(defaultText);
+  }, [currentModel, getDefaultTextForModel]);
+
+  // Remove the automatic text processing effect that watches for input changes
+  // This is the effect that we need to remove or modify
+  useEffect(() => {
+    console.log("Text processing effect triggered:", {
+      backendAvailable,
+      inputText,
+      lastProcessedText,
+      currentModel,
+      lastProcessedModel,
+      shouldProcess: backendAvailable && inputText && 
+          (inputText !== lastProcessedText || currentModel !== lastProcessedModel)
+    });
+    
+    // REMOVE this automatic processing logic that runs on every input change
+    // We'll keep just the initialization logic for when the component mounts
+    if (backendAvailable && inputText && inputText.trim().length > 0 && 
+        lastProcessedText === "" && lastProcessedModel === "") {
+      console.log("Processing initial text through effect:", inputText, currentModel);
+      fetchAttentionData(inputText);
+    }
+  }, [backendAvailable, inputText, currentModel, lastProcessedText, lastProcessedModel, fetchAttentionData]);
+
+  // Simplify the handleTextChange function - now it only updates the state
+  const handleTextChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const text = e.target.value;
+    console.log("Text changed to:", text);
+    setInputText(text);
+    // No processing happens here - just update the state
+  };
+
   // Handle model change
-  const handleModelChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    const newModel = e.target.value;
+  const handleModelChange = (newModel: string) => {
+    // If the model hasn't changed, do nothing
+    if (newModel === currentModel) {
+      setIsModelDropdownOpen(false);
+      return;
+    }
+    
     setCurrentModel(newModel);
+    setIsModelDropdownOpen(false); // Close dropdown after selection
     
     // Reset selections when changing models
     setSelectedHeads([]);
@@ -421,14 +460,29 @@ const AttentionFlowGraph = () => {
     });
     
     // Set model-specific default text
-    if (textareaRef.current) {
-      const defaultText = getDefaultTextForModel(newModel);
-      textareaRef.current.value = defaultText;
-      
-      // Process the default text immediately
-      debouncedFetchAttentionData(defaultText);
-    }
+    const defaultText = getDefaultTextForModel(newModel);
+    setInputText(defaultText);
+    
+    // Add a notification that the user needs to click Process Text after changing the model
+    setTextError("Model changed. Click 'Process Text' to analyze with the new model.");
   };
+
+  // Custom dropdown ref
+  const modelDropdownRef = useRef<HTMLDivElement>(null);
+  
+  // Handle clicks outside the model dropdown
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (modelDropdownRef.current && !modelDropdownRef.current.contains(event.target as Element)) {
+        setIsModelDropdownOpen(false);
+      }
+    }
+    
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, []);
 
   // Initialize predefined head groups
   useEffect(() => {
@@ -749,7 +803,37 @@ const AttentionFlowGraph = () => {
     "#FBB6CE", // Pink-300
     "#B2F5EA", // Teal-200
     "#667EEA", // Indigo-600
-    "#ED64A6"  // Pink-500
+    "#ED64A6", // Pink-500
+    "#48BB78", // Green-500
+    "#ECC94B", // Yellow-400
+    "#4299E1", // Blue-500
+    "#ED8936", // Orange-500
+    "#9F7AEA", // Purple-500
+    "#F56565", // Red-500
+    "#38A169", // Green-600
+    "#D69E2E", // Yellow-500
+    "#3182CE", // Blue-600
+    "#DD6B20", // Orange-600
+    "#805AD5", // Purple-600
+    "#E53E3E", // Red-600
+    "#2F855A", // Green-700
+    "#B7791F", // Yellow-600
+    "#2B6CB0", // Blue-700
+    "#C05621", // Orange-700
+    "#6B46C1", // Purple-700
+    "#C53030", // Red-700
+    "#276749", // Green-800
+    "#744210", // Yellow-700
+    "#2C5282", // Blue-800
+    "#9C4221", // Orange-800
+    "#553C9A", // Purple-800
+    "#9B2C2C", // Red-800
+    "#22543D", // Green-900
+    "#5F370E", // Yellow-800
+    "#2A4365", // Blue-900
+    "#7B341E", // Orange-900
+    "#44337A", // Purple-900
+    "#822727"  // Red-900
   ], []);
 
   // Add array to store custom colors for groups
@@ -804,10 +888,50 @@ const AttentionFlowGraph = () => {
     return colorPalette[groupId % colorPalette.length];
   }, [groupColors, colorPalette]);
 
+  // Add a utility for debounced redrawing
+  const useDebounce = (fn: () => void, delay: number) => {
+    const timeoutRef = useRef<NodeJS.Timeout | null>(null);
+    
+    useEffect(() => {
+      return () => {
+        if (timeoutRef.current) {
+          clearTimeout(timeoutRef.current);
+        }
+      };
+    }, []);
+    
+    return () => {
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+      }
+      
+      timeoutRef.current = setTimeout(() => {
+        fn();
+        timeoutRef.current = null;
+      }, delay);
+    };
+  };
+
+  // Add color scale for groups
+  const groupColorScale = useMemo(() => {
+    const groups = [...predefinedGroups, ...headGroups];
+    return d3.scaleOrdinal<string>()
+      .domain(groups.map(g => g.name))
+      .range(d3.schemeCategory10);
+  }, [predefinedGroups, headGroups]);
+
   // Memoize drawGraph to prevent infinite loops
   const drawGraph = React.useCallback(() => {
+    if (!svgRef.current) return;
+    
+    // Use a more performant approach with D3
     const svg = d3.select(svgRef.current);
+    
+    // Clear only if needed - don't do this on every render
     svg.selectAll("*").remove();
+    
+    // Set viewBox for better responsiveness
+    svg.attr("viewBox", `0 0 ${graphDimensions.width} ${graphDimensions.height}`);
     
     const width = graphDimensions.width;
     const height = graphDimensions.height;
@@ -853,22 +977,26 @@ const AttentionFlowGraph = () => {
         groupId: getHeadGroup(edge.sourceLayer, edge.head) ?? -1
       }));
     
-    // Draw layers and tokens labels
-    const g = svg.append("g");
+    // Use a single container for better performance
+    const g = svg.append("g").attr("class", "graph-container");
     
+    // First add all static elements
+
     // Layer labels (now on y-axis)
-    for (let l = 0; l < data.numLayers; l++) {
-      g.append("text")
-        .attr("x", padding.left / 2 + 25)  // Increased from 15 to 25
-        .attr("y", height - (padding.bottom + l * layerHeight))
-        .attr("text-anchor", "middle")
-        .attr("dominant-baseline", "middle")
-        .text(l.toString());
-    }
+    g.selectAll(".layer-label")
+      .data(Array(data.numLayers).fill(0).map((_, i) => i))
+      .enter()
+      .append("text")
+      .attr("class", "layer-label")
+      .attr("x", padding.left / 2 + 25)
+      .attr("y", d => height - (padding.bottom + d * layerHeight))
+      .attr("text-anchor", "middle")
+      .attr("dominant-baseline", "middle")
+      .text(d => d.toString());
     
     // Y-axis label (Layers)
     g.append("text")
-      .attr("x", padding.left / 2)  // Moved from -25 to center position
+      .attr("x", padding.left / 2)
       .attr("y", height / 2)
       .attr("text-anchor", "middle")
       .attr("dominant-baseline", "middle")
@@ -877,14 +1005,16 @@ const AttentionFlowGraph = () => {
       .text("Layer");
     
     // Token labels (now on x-axis)
-    for (let t = 0; t < data.numTokens; t++) {
-      g.append("text")
-        .attr("x", padding.left + t * tokenWidth + tokenWidth / 2)
-        .attr("y", height - padding.bottom / 2)
-        .attr("text-anchor", "middle")
-        .attr("dominant-baseline", "middle")
-        .text(data.tokens?.[t] || `T${t}`);  // Use actual token if available
-    }
+    g.selectAll(".token-label")
+      .data(Array(data.numTokens).fill(0).map((_, i) => i))
+      .enter()
+      .append("text")
+      .attr("class", "token-label")
+      .attr("x", d => padding.left + d * tokenWidth + tokenWidth / 2)
+      .attr("y", height - padding.bottom / 2)
+      .attr("text-anchor", "middle")
+      .attr("dominant-baseline", "middle")
+      .text(d => data.tokens?.[d] || `T${d}`);
 
     // X-axis label (Tokens)
     g.append("text")
@@ -896,65 +1026,157 @@ const AttentionFlowGraph = () => {
       .attr("font-weight", "medium")
       .text("Token");
     
-    // Draw edges first (so they're behind nodes)
-    const linkElements = g.selectAll("path")
+    // Create link paths in a more efficient way
+    const linkContainer = g.append("g").attr("class", "links");
+    
+    // Path generator function
+    const pathGenerator = (d: Link) => {
+      const source = nodes.find(n => n.id === d.source)!;
+      const target = nodes.find(n => n.id === d.target)!;
+      
+      const dx = target.x - source.x;
+      const controlPoint1x = source.x + dx * 0.5;
+      const controlPoint1y = source.y;
+      const controlPoint2x = target.x - dx * 0.5;
+      const controlPoint2y = target.y;
+      
+      return `M ${source.x} ${source.y} C ${controlPoint1x} ${controlPoint1y}, ${controlPoint2x} ${controlPoint2y}, ${target.x} ${target.y}`;
+    };
+    
+    // Add links in a batch for better performance
+    const linkElements = linkContainer.selectAll("path")
       .data(links)
       .enter()
       .append("path")
-      .attr("d", (d: Link) => {
-        const source = nodes.find(n => n.id === d.source)!;
-        const target = nodes.find(n => n.id === d.target)!;
-        
-        // Calculate control points for the curve
-        const dx = target.x - source.x;
-        const controlPoint1x = source.x + dx * 0.5;
-        const controlPoint1y = source.y;
-        const controlPoint2x = target.x - dx * 0.5;
-        const controlPoint2y = target.y;
-        
-        // Create a curved path using cubic Bezier curve
-        return `M ${source.x} ${source.y} ` +
-               `C ${controlPoint1x} ${controlPoint1y}, ` +
-               `${controlPoint2x} ${controlPoint2y}, ` +
-               `${target.x} ${target.y}`;
-      })
+      .attr("class", "link")
+      .attr("d", pathGenerator)
       .attr("fill", "none")
-      .attr("stroke", (d: Link) => {
-        if (d.groupId === -1) {
-          return individualHeadColorScale(d.head.toString());
-        }
-        return getGroupColor(d.groupId);
-      })
+      .attr("stroke", d => d.groupId === -1 ? individualHeadColorScale(d.head.toString()) : getGroupColor(d.groupId))
       .attr("stroke-width", 4)
       .attr("opacity", 0.6)
-      .attr("data-source", (d: Link) => d.source)
-      .attr("data-target", (d: Link) => d.target)
+      .attr("data-source", d => d.source)
+      .attr("data-target", d => d.target)
       .style("cursor", "pointer")
-      .on("mouseover", function(this: SVGPathElement) {
+      .on("mouseover", function(this: SVGPathElement, d: Link) {
+        // Highlight the hovered link
         d3.select(this)
           .attr("opacity", 1)
           .attr("stroke-width", 6);
+
+        // If the link belongs to a group, highlight all links in that group
+        if (d.groupId !== -1) {
+          linkContainer.selectAll("path")
+            .filter(function(l) {
+              return (l as Link).groupId === d.groupId;
+            })
+            .attr("opacity", 0.8)
+            .attr("stroke-width", 5);
+
+          // Also highlight the nodes connected to this group's links
+          const groupLinks = links.filter((l: Link) => l.groupId === d.groupId);
+          const groupNodeIds = new Set([
+            ...groupLinks.map((l: Link) => l.source),
+            ...groupLinks.map((l: Link) => l.target)
+          ]);
+
+          nodeContainer.selectAll("circle")
+            .filter(function(n) {
+              return groupNodeIds.has((n as Node).id);
+            })
+            .attr("fill", "#d1d5db")
+            .attr("r", 8);
+
+          // Highlight the corresponding group in the legend
+          legendContainer.selectAll(".legend-item")
+            .filter(function() {
+              const text = d3.select(this).select("text").text();
+              const group = headGroups.find(g => g.id === d.groupId);
+              return group ? text === group.name : false;
+            })
+            .select("text")
+            .attr("font-weight", "bold")
+            .attr("fill", "#3B82F6");
+        } else {
+          // For individual heads, highlight the corresponding head in the legend
+          legendContainer.selectAll(".legend-item")
+            .filter(function() {
+              const text = d3.select(this).select("text").text();
+              return text === `L${d.source.split('-')[0]}, H${d.head}`;
+            })
+            .select("text")
+            .attr("font-weight", "bold")
+            .attr("fill", "#3B82F6");
+        }
       })
-      .on("mouseout", function(this: SVGPathElement) {
+      .on("mouseout", function(this: SVGPathElement, d: Link) {
+        // Reset the hovered link
         d3.select(this)
-          .attr("opacity", 0.9)
+          .attr("opacity", 0.6)
           .attr("stroke-width", 4);
-      }); 
+
+        // If the link belonged to a group, reset all links in that group
+        if (d.groupId !== -1) {
+          linkContainer.selectAll("path")
+            .filter(function(l) {
+              return (l as Link).groupId === d.groupId;
+            })
+            .attr("opacity", 0.6)
+            .attr("stroke-width", 4);
+
+          // Reset the nodes
+          const groupLinks = links.filter((l: Link) => l.groupId === d.groupId);
+          const groupNodeIds = new Set([
+            ...groupLinks.map((l: Link) => l.source),
+            ...groupLinks.map((l: Link) => l.target)
+          ]);
+
+          nodeContainer.selectAll("circle")
+            .filter(function(n) {
+              return groupNodeIds.has((n as Node).id);
+            })
+            .attr("fill", "#e5e7eb")
+            .attr("r", 6);
+
+          // Reset the corresponding group in the legend
+          legendContainer.selectAll(".legend-item")
+            .filter(function() {
+              const text = d3.select(this).select("text").text();
+              const group = headGroups.find(g => g.id === d.groupId);
+              return group ? text === group.name : false;
+            })
+            .select("text")
+            .attr("font-weight", "normal")
+            .attr("fill", "currentColor");
+        } else {
+          // Reset the corresponding head in the legend
+          legendContainer.selectAll(".legend-item")
+            .filter(function() {
+              const text = d3.select(this).select("text").text();
+              return text === `L${d.source.split('-')[0]}, H${d.head}`;
+            })
+            .select("text")
+            .attr("font-weight", "normal")
+            .attr("fill", "currentColor");
+        }
+      });
+
+    // Add nodes in a batch
+    const nodeContainer = g.append("g").attr("class", "nodes");
     
-    // Draw nodes
-    const nodeElements = g.selectAll("circle")
+    const nodeElements = nodeContainer.selectAll("circle")
       .data(nodes)
       .enter()
       .append("circle")
-      .attr("cx", (d: Node) => d.x)
-      .attr("cy", (d: Node) => d.y)
-      .attr("r", 6) // Decreased radius
+      .attr("class", "node")
+      .attr("cx", d => d.x)
+      .attr("cy", d => d.y)
+      .attr("r", 6)
       .attr("fill", "#e5e7eb")
-      .attr("data-node-id", (d: Node) => d.id)
+      .attr("data-node-id", d => d.id)
       .style("cursor", "pointer")
       .on("mouseover", function() {
         d3.select(this)
-          .attr("r", 8) // Decreased hover radius
+          .attr("r", 8)
           .attr("fill", "#d1d5db");
       })
       .on("mouseout", function() {
@@ -963,249 +1185,218 @@ const AttentionFlowGraph = () => {
           .attr("fill", "#e5e7eb");
       });
 
-    // Add invisible larger circles for easier hovering
-    g.selectAll("circle.hover-target")
-      .data(nodes)
-      .enter()
-      .append("circle")
-      .attr("class", "hover-target")
-      .attr("cx", (d: Node) => d.x)
-      .attr("cy", (d: Node) => d.y)
-      .attr("r", 12) // Decreased hover target radius
-      .attr("fill", "transparent")
-      .attr("data-node-id", (d: Node) => d.id)
-      .style("cursor", "pointer")
-      .on("mouseover", function(event: MouseEvent, d: Node) {
-        // Show tooltip
-        const tooltipDiv = d3.select<HTMLDivElement, unknown>("#graph-tooltip");
-        tooltipDiv
-          .style("display", "block")
-          .style("position", "absolute")
-          .style("background", "white")
-          .style("padding", "5px")
-          .style("border", "1px solid #ccc")
-          .style("border-radius", "4px")
-          .style("font-size", "12px")
-          .style("pointer-events", "none")
-          .html(`Layer ${d.layer}, Token ${d.token}`);
-
-        // Position tooltip
-        tooltipDiv
-          .style("left", (event.pageX + 10) + "px")
-          .style("top", (event.pageY - 10) + "px");
-
-        // Highlight node
-        const parent = this.parentElement;
-        if (parent) {
-          d3.select(parent)
-            .select(`circle[data-node-id="${d.id}"]:not(.hover-target)`)
-            .attr("r", 8)
-            .attr("fill", "#d1d5db");
-        }
-      })
-      .on("mouseout", function(event: MouseEvent, d: Node) {
-        // Hide tooltip
-        d3.select<HTMLDivElement, unknown>("#graph-tooltip").style("display", "none");
-
-        // Reset node
-        const parent = this.parentElement;
-        if (parent) {
-          d3.select(parent)
-            .select(`circle[data-node-id="${d.id}"]:not(.hover-target)`)
-            .attr("r", 6)
-            .attr("fill", "#e5e7eb");
-        }
-      });
-
-    // Update the invisible hover targets for edges
-    g.selectAll<SVGPathElement, Link>("path.hover-target")
-      .data(links)
-      .enter()
-      .append("path")
-      .attr("class", "hover-target")
-      .attr("d", (d: Link) => {
-        const source = nodes.find(n => n.id === d.source)!;
-        const target = nodes.find(n => n.id === d.target)!;
-        
-        // Calculate control points for the curve
-        const dx = target.x - source.x;
-        const controlPoint1x = source.x + dx * 0.5;
-        const controlPoint1y = source.y;
-        const controlPoint2x = target.x - dx * 0.5;
-        const controlPoint2y = target.y;
-        
-        // Create a curved path using cubic Bezier curve
-        return `M ${source.x} ${source.y} ` +
-               `C ${controlPoint1x} ${controlPoint1y}, ` +
-               `${controlPoint2x} ${controlPoint2y}, ` +
-               `${target.x} ${target.y}`;
-      })
-      .attr("stroke", "transparent")
-      .attr("fill", "none")
-      .attr("stroke-width", 20)
-      .attr("data-source", (d: Link) => d.source)
-      .attr("data-target", (d: Link) => d.target)
-      .style("cursor", "pointer")
-      .on("mouseover", function(event: MouseEvent, d: Link) {
-        // Show tooltip
-        const tooltipDiv = d3.select<HTMLDivElement, unknown>("#graph-tooltip");
-        tooltipDiv
-          .style("display", "block")
-          .style("position", "absolute")
-          .style("background", "white")
-          .style("padding", "5px")
-          .style("border", "1px solid #ccc")
-          .style("border-radius", "4px")
-          .style("font-size", "12px")
-          .style("pointer-events", "none");
-
-        const group = headGroups.find(g => g.id === d.groupId);
-        const sourceNode = nodes.find(n => n.id === d.source)!;
-        tooltipDiv
-          .html(`Head: Layer ${sourceNode.layer}, Head ${d.head}<br>Weight: ${d.weight.toFixed(4)}${
-            group ? 
-            `<br>Group: ${group.name}${group.description ? `<br><span style="font-style: italic; font-size: 11px;">${group.description}</span>` : ''}` : 
-            '<br>Individual Head'
-          }`)
-          .style("left", (event.pageX + 10) + "px")
-          .style("top", (event.pageY - 10) + "px");
-
-        // Highlight edge
-        const parent = this.parentElement as unknown as SVGGElement;
-        if (parent) {
-          d3.select(parent)
-            .select<SVGPathElement>(`path[data-source="${d.source}"][data-target="${d.target}"]:not(.hover-target)`)
-            .attr("opacity", 0.9)
-            .attr("stroke-width", 6);
-        }
-      })
-      .on("mouseout", function(event: MouseEvent, d: Link) {
-        // Hide tooltip
-        d3.select<HTMLDivElement, unknown>("#graph-tooltip").style("display", "none");
-
-        // Reset edge
-        const parent = this.parentElement as unknown as SVGGElement;
-        if (parent) {
-          d3.select(parent)
-            .select<SVGPathElement>(`path[data-source="${d.source}"][data-target="${d.target}"]:not(.hover-target)`)
-            .attr("opacity", 0.6)
-            .attr("stroke-width", 4);
-        }
-      });
-
-    // Remove the old tooltips since we're using dynamic ones now
-    linkElements.select("title").remove();
-    nodeElements.select("title").remove();
-
     // Add legend
-    const legend = svg.append("g")
-      .attr("transform", `translate(${width - padding.right + 20}, ${padding.top})`);
-
-    // Add legend title
-    legend.append("text")
+    const legendContainer = g.append("g")
+      .attr("class", "legend")
+      .attr("transform", `translate(${width - legendWidth + 20}, ${padding.top + 20})`);
+    
+    // Legend title
+    legendContainer.append("text")
       .attr("x", 0)
       .attr("y", 0)
       .attr("font-size", "14px")
       .attr("font-weight", "bold")
       .text("Legend");
-
-    // Add group colors to legend
-    headGroups.forEach((group, i) => {
-      const y = 30 + i * 25;
-      
-      // Add color rectangle with click handler
-      legend.append("rect")
+    
+    // Group legends - show first
+    let legendY = 30;
+    if (headGroups.length > 0) {
+      legendContainer.append("text")
         .attr("x", 0)
-        .attr("y", y)
-        .attr("width", 15)
-        .attr("height", 15)
-        .attr("fill", getGroupColor(group.id))
-        .style("cursor", "pointer")
-        .on("click", () => changeGroupColor(group.id));
-      
-      // Add group name
-      const groupText = legend.append("text")
-        .attr("x", 25)
-        .attr("y", y + 12)
+        .attr("y", legendY)
         .attr("font-size", "12px")
-        .text(group.name)
-        .style("cursor", "pointer");
+        .attr("font-weight", "medium")
+        .text("Head Groups");
       
-      // Add tooltip behavior for group description
-      if (group.description) {
-        groupText
-          .on("mouseenter", function(event: MouseEvent) {
-            const tooltipDiv = d3.select<HTMLDivElement, unknown>("#graph-tooltip");
-            tooltipDiv
-              .style("display", "block")
-              .style("position", "absolute")
-              .style("background", "white")
-              .style("padding", "6px 8px")
-              .style("border", "1px solid #ccc")
-              .style("border-radius", "4px")
-              .style("font-size", "12px")
-              .style("max-width", "250px")
-              .style("pointer-events", "none")
-              .html(`<strong>${group.name}</strong><br>${group.description}`)
-              .style("left", (event.pageX + 10) + "px")
-              .style("top", (event.pageY - 10) + "px");
+      legendY += 20;
+      
+      headGroups.forEach((group, i) => {
+        // Skip empty groups
+        if (group.heads.length === 0) return;
+        
+        // Create a group for each legend item
+        const legendItem = legendContainer.append("g")
+          .attr("class", "legend-item")
+          .attr("cursor", "pointer")
+          .on("click", () => changeGroupColor(group.id));
+        
+        // Line
+        legendItem.append("line")
+          .attr("x1", 0)
+          .attr("y1", legendY)
+          .attr("x2", 30)
+          .attr("y2", legendY)
+          .attr("stroke", getGroupColor(group.id))
+          .attr("stroke-width", 4)
+          .attr("opacity", 0.8);
+        
+        // Text
+        const textElement = legendItem.append("text")
+          .attr("x", 40)
+          .attr("y", legendY + 4)
+          .attr("font-size", "12px")
+          .text(group.name)
+          .on("mouseover", function() {
+            // Highlight all links in this group
+            linkContainer.selectAll("path")
+              .filter(function(l) {
+                return (l as Link).groupId === group.id;
+              })
+              .attr("opacity", 0.8)
+              .attr("stroke-width", 5);
+
+            // Highlight connected nodes
+            const groupLinks = links.filter((l: Link) => l.groupId === group.id);
+            const groupNodeIds = new Set([
+              ...groupLinks.map((l: Link) => l.source),
+              ...groupLinks.map((l: Link) => l.target)
+            ]);
+
+            nodeContainer.selectAll("circle")
+              .filter(function(n) {
+                return groupNodeIds.has((n as Node).id);
+              })
+              .attr("fill", "#d1d5db")
+              .attr("r", 8);
+
+            // Highlight the legend text
+            d3.select(this)
+              .attr("font-weight", "bold")
+              .attr("fill", "#3B82F6");
           })
-          .on("mouseleave", function() {
-            d3.select<HTMLDivElement, unknown>("#graph-tooltip").style("display", "none");
+          .on("mouseout", function() {
+            // Reset all links in this group
+            linkContainer.selectAll("path")
+              .filter(function(l) {
+                return (l as Link).groupId === group.id;
+              })
+              .attr("opacity", 0.6)
+              .attr("stroke-width", 4);
+
+            // Reset connected nodes
+            const groupLinks = links.filter((l: Link) => l.groupId === group.id);
+            const groupNodeIds = new Set([
+              ...groupLinks.map((l: Link) => l.source),
+              ...groupLinks.map((l: Link) => l.target)
+            ]);
+
+            nodeContainer.selectAll("circle")
+              .filter(function(n) {
+                return groupNodeIds.has((n as Node).id);
+              })
+              .attr("fill", "#e5e7eb")
+              .attr("r", 6);
+
+            // Reset the legend text
+            d3.select(this)
+              .attr("font-weight", "normal")
+              .attr("fill", "currentColor");
           });
-      }
-    });
-
-    // Add separator
-    const separatorY = 30 + headGroups.length * 25 + 10;
-    legend.append("line")
-      .attr("x1", 0)
-      .attr("x2", legendWidth - padding.left)
-      .attr("y1", separatorY)
-      .attr("y2", separatorY)
-      .attr("stroke", "#e5e7eb")
-      .attr("stroke-width", 2);
-
-    // Add individual heads section title
-    legend.append("text")
-      .attr("x", 0)
-      .attr("y", separatorY + 25)
-      .attr("font-size", "12px")
-      .attr("font-weight", "bold")
-      .text("Individual Heads");
-
-    // Add individual head colors to legend
-    const visibleIndividualHeads = selectedHeads.filter(h => 
+        
+        legendY += 20;
+      });
+      
+      // Add some space before individual heads
+      legendY += 10;
+    }
+    
+    // Individual heads section
+    const individualHeads = selectedHeads.filter(h => 
       !headGroups.some(g => g.heads.some(gh => gh.layer === h.layer && gh.head === h.head))
     );
-
-    visibleIndividualHeads.forEach((head, i) => {
-      const y = separatorY + 40 + i * 25;
-      
-      // Add color rectangle
-      legend.append("rect")
+    
+    if (individualHeads.length > 0) {
+      legendContainer.append("text")
         .attr("x", 0)
-        .attr("y", y)
-        .attr("width", 15)
-        .attr("height", 15)
-        .attr("fill", individualHeadColorScale(head.head.toString()));
-      
-      // Add head label
-      legend.append("text")
-        .attr("x", 25)
-        .attr("y", y + 12)
+        .attr("y", legendY)
         .attr("font-size", "12px")
-        .text(`Layer ${head.layer}, Head ${head.head}`);
-    });
+        .attr("font-weight", "medium")
+        .text("Individual Heads");
+      
+      legendY += 20;
+      
+      individualHeads.forEach(head => {
+        // Create a group for each individual head legend item
+        const legendItem = legendContainer.append("g")
+          .attr("class", "legend-item")
+          .attr("cursor", "pointer");
+        
+        // Line 
+        legendItem.append("line")
+          .attr("x1", 0)
+          .attr("y1", legendY)
+          .attr("x2", 30)
+          .attr("y2", legendY)
+          .attr("stroke", individualHeadColorScale(head.head.toString()))
+          .attr("stroke-width", 4)
+          .attr("opacity", 0.8);
+        
+        // Text
+        legendItem.append("text")
+          .attr("x", 40)
+          .attr("y", legendY + 4)
+          .attr("font-size", "12px")
+          .text(`L${head.layer}, H${head.head}`)
+          .on("mouseover", function() {
+            // Highlight all links for this head
+            linkContainer.selectAll("path")
+              .filter(function(l) {
+                return (l as Link).head === head.head && (l as Link).groupId === -1;
+              })
+              .attr("opacity", 0.8)
+              .attr("stroke-width", 5);
 
-    // Add tooltip container to DOM if it doesn't exist
-    if (!document.getElementById("graph-tooltip")) {
-      const tooltipDiv = document.createElement("div");
-      tooltipDiv.id = "graph-tooltip";
-      tooltipDiv.style.display = "none";
-      document.body.appendChild(tooltipDiv);
+            // Highlight connected nodes
+            const headLinks = links.filter((l: Link) => l.head === head.head && l.groupId === -1);
+            const headNodeIds = new Set([
+              ...headLinks.map((l: Link) => l.source),
+              ...headLinks.map((l: Link) => l.target)
+            ]);
+
+            nodeContainer.selectAll("circle")
+              .filter(function(n) {
+                return headNodeIds.has((n as Node).id);
+              })
+              .attr("fill", "#d1d5db")
+              .attr("r", 8);
+
+            // Highlight the legend text
+            d3.select(this)
+              .attr("font-weight", "bold")
+              .attr("fill", "#3B82F6");
+          })
+          .on("mouseout", function() {
+            // Reset all links for this head
+            linkContainer.selectAll("path")
+              .filter(function(l) {
+                return (l as Link).head === head.head && (l as Link).groupId === -1;
+              })
+              .attr("opacity", 0.6)
+              .attr("stroke-width", 4);
+
+            // Reset connected nodes
+            const headLinks = links.filter((l: Link) => l.head === head.head && l.groupId === -1);
+            const headNodeIds = new Set([
+              ...headLinks.map((l: Link) => l.source),
+              ...headLinks.map((l: Link) => l.target)
+            ]);
+
+            nodeContainer.selectAll("circle")
+              .filter(function(n) {
+                return headNodeIds.has((n as Node).id);
+              })
+              .attr("fill", "#e5e7eb")
+              .attr("r", 6);
+
+            // Reset the legend text
+            d3.select(this)
+              .attr("font-weight", "normal")
+              .attr("fill", "currentColor");
+          });
+        
+        legendY += 20;
+      });
     }
-
   }, [
     data, 
     threshold, 
@@ -1221,11 +1412,17 @@ const AttentionFlowGraph = () => {
     graphDimensions.padding
   ]);
 
+  // Create a debounced version of the drawGraph function
+  const debouncedDrawGraph = useDebounce(drawGraph, 100);
+
   // Draw the graph whenever relevant state changes
   useEffect(() => {
-    if (!data.attentionPatterns.length) return;
-    drawGraph();
-  }, [data, threshold, selectedHeads, headGroups, drawGraph]);
+    // Only draw the graph if we have attention patterns data and no errors
+    if (!data.attentionPatterns.length || loading) return;
+    
+    // Use the debounced version for smoother performance
+    debouncedDrawGraph();
+  }, [data, threshold, selectedHeads, headGroups, debouncedDrawGraph, loading]);
 
   // Add function to handle clicks outside the dropdown
   useEffect(() => {
@@ -1241,28 +1438,36 @@ const AttentionFlowGraph = () => {
     };
   }, []);
 
-  // Restore focus to textarea after any rendering that might have caused it to lose focus
-  useEffect(() => {
-    // Only focus if we're not loading and the backend is available
-    if (!loading && backendAvailable && textareaRef.current) {
-      textareaRef.current.focus();
+  // Update the forceProcessText function to make it clearer that it's the only way to process text
+  const forceProcessText = () => {
+    console.log("Processing text via button click:", inputText);
+    if (inputText.trim().length > 0) {
+      fetchAttentionData(inputText);
     }
-  }, [loading, backendAvailable, data]);
+  };
 
-  // Process default text on initial mount
+  // Add a component mount effect for initial processing - keep this to ensure proper initialization
   useEffect(() => {
-    if (backendAvailable && textareaRef.current) {
-      // Get the default text for the current model
-      const defaultText = getDefaultTextForModel(currentModel);
-      
-      // Process the default text
-      debouncedFetchAttentionData(defaultText);
+    // Initialize with default text for the current model
+    const defaultText = getDefaultTextForModel(currentModel);
+    setInputText(defaultText);
+    
+    // Process the default text if backend is available and we haven't processed any text yet
+    if (backendAvailable && defaultText && lastProcessedText === "") {
+      console.log("Processing default text on component mount:", defaultText);
+      // Use a small delay to ensure state has updated
+      setTimeout(() => {
+        fetchAttentionData(defaultText);
+      }, 100);
     }
-  }, [backendAvailable, currentModel, debouncedFetchAttentionData, getDefaultTextForModel]);
+  }, [backendAvailable, currentModel, getDefaultTextForModel, lastProcessedText, fetchAttentionData]);
 
   return (
     <>
-      <style jsx>{sliderStyles}</style>
+      <style jsx>{`
+        ${sliderStyles}
+        ${svgOptimizationStyles}
+      `}</style>
       {/* Tooltip container that will be populated by D3 */}
       <div id="graph-tooltip" style={{ display: 'none', position: 'absolute', zIndex: 1000 }}></div>
       <div className="flex flex-col gap-6 p-4 max-w-[1200px] mx-auto">
@@ -1274,21 +1479,47 @@ const AttentionFlowGraph = () => {
               <div className="text-[#3B82F6] text-sm">Checking backend availability...</div>
             ) : (
               <div className="flex flex-col gap-6">
-                {/* Model Selector - Always visible since we have model-specific sample data */}
+                {/* Model Selector - Custom implementation */}
                 <div className="p-4 border border-gray-100 rounded-lg bg-gray-50/80 shadow-[0_1px_2px_rgba(0,0,0,0.03)]">
                   <label className="text-sm font-medium mb-2 block">Model</label>
-                  <select
-                    className="w-full p-2 text-sm bg-white border border-gray-200 rounded-md focus:border-[#3B82F6] focus:outline-none shadow-[0_1px_2px_rgba(0,0,0,0.02)]"
-                    value={currentModel}
-                    onChange={handleModelChange}
-                    disabled={loading}
-                  >
-                    {availableModels.map((model) => (
-                      <option key={model} value={model}>{model}</option>
-                    ))}
-                  </select>
+                  
+                  {/* Custom dropdown */}
+                  <div className="relative" ref={modelDropdownRef}>
+                    <button
+                      type="button"
+                      className="w-full p-2 text-sm bg-white border border-gray-200 rounded-md focus:border-[#3B82F6] focus:outline-none shadow-[0_1px_2px_rgba(0,0,0,0.02)] text-left flex justify-between items-center"
+                      onClick={() => setIsModelDropdownOpen(!isModelDropdownOpen)}
+                    >
+                      <span>{currentModel}</span>
+                      <svg className="w-4 h-4 ml-2" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                      </svg>
+                    </button>
+                    
+                    {isModelDropdownOpen && (
+                      <div className="absolute z-10 w-full mt-1 bg-white border border-gray-200 rounded-md shadow-lg">
+                        <ul className="py-1 max-h-60 overflow-auto">
+                          {availableModels.map((model) => (
+                            <li
+                              key={model}
+                              className={`px-3 py-2 text-sm cursor-pointer hover:bg-gray-100 ${model === currentModel ? 'font-semibold bg-blue-50' : ''}`}
+                              onClick={() => handleModelChange(model)}
+                            >
+                              {model}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                  </div>
+                  
                   <div className="text-xs text-gray-600 mt-2">
                     Predefined head groups are specific to the selected model.
+                  </div>
+                  <div className="mt-2 p-2 bg-blue-50 rounded text-xs text-blue-800">
+                    <p className="font-medium">Model Loading:</p>
+                    <p>When you select a model that isn't currently loaded, the backend will attempt to load it. Please be patient as this may take some time, especially for larger models like Pythia.</p>
+                    {loading && currentModel !== lastProcessedModel && <p className="mt-1 font-medium text-blue-600">Loading model data... Please wait.</p>}
                   </div>
                 </div>
                 
@@ -1527,17 +1758,29 @@ const AttentionFlowGraph = () => {
                           ref={textareaRef}
                           className="w-full p-3 text-sm bg-[#F3F4F6] border-0 border-b border-transparent focus:border-[#3B82F6] focus:bg-white focus:outline-none transition-all duration-200 ease-in-out disabled:bg-gray-100 disabled:border-transparent disabled:cursor-not-allowed resize-none rounded-md shadow-[0_1px_2px_rgba(0,0,0,0.02)]"
                           rows={2}
-                          placeholder="Enter text to analyze attention patterns..."
-                          onChange={(e) => debouncedFetchAttentionData(e.target.value)}
+                          placeholder="Enter text here, then click 'Process Text' to analyze attention patterns..."
+                          onChange={handleTextChange}
                           disabled={loading || !backendAvailable}
-                          defaultValue={getDefaultTextForModel(currentModel)}
+                          value={inputText}
                         />
-                        {loading && (
-                          <div className="text-xs text-[#3B82F6] mt-2">Loading attention patterns...</div>
-                        )}
-                        {textError && (
-                          <div className="text-xs text-red-500 mt-2">{textError}</div>
-                        )}
+                        <div className="flex items-center justify-between mt-2">
+                          {loading && (
+                            <div className="text-xs text-[#3B82F6]">Loading attention patterns...</div>
+                          )}
+                          {textError && (
+                            <div className="text-xs text-red-500">{textError}</div>
+                          )}
+                          <button
+                            onClick={forceProcessText}
+                            className="ml-auto px-4 py-2 text-sm bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors font-medium shadow-sm flex items-center"
+                            disabled={loading || !inputText}
+                          >
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                            </svg>
+                            Process Text
+                          </button>
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -1561,7 +1804,7 @@ const AttentionFlowGraph = () => {
             <div className="text-sm">Loading...</div>
           </div>
         ) : (
-          <div className="border border-gray-100 rounded-lg bg-white overflow-hidden shadow-[0_1px_2px_rgba(0,0,0,0.03)]">
+          <div className="border border-gray-100 rounded-lg bg-white overflow-hidden shadow-[0_1px_2px_rgba(0,0,0,0.03)] svg-container">
             <svg ref={svgRef} width={graphDimensions.width} height={graphDimensions.height}></svg>
           </div>
         )}
